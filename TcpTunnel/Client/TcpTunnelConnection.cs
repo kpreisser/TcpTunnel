@@ -13,7 +13,7 @@ namespace TcpTunnel.Client
 {
     internal class TcpTunnelConnection
     {
-        private const int DefaultWindowSize = 64 * 1024;
+        private const int InitialWindowSize = 64 * 1024;
 
         private readonly TcpClient remoteClient;
         private NetworkStream remoteClientStream;
@@ -107,7 +107,7 @@ namespace TcpTunnel.Client
                     while (receiveWindowQueueSemaphore.Wait(0))
                     {
                         ReceiveWindowQueueEntry e;
-                        if (receiveWindowQueue.TryDequeue(out e))
+                        if (!receiveWindowQueue.TryDequeue(out e))
                             throw new InvalidOperationException();
 
                         window += e.Window;
@@ -142,7 +142,7 @@ namespace TcpTunnel.Client
                     RunTransmitTaskAsync));
 
                 // Update the transmit window.
-                transmitWindowUpdateHandler?.Invoke(DefaultWindowSize);
+                transmitWindowUpdateHandler?.Invoke(InitialWindowSize);
 
                 // Now start to receive.
                 byte[] receiveBuffer = new byte[Constants.ReceiveBufferSize];
@@ -161,7 +161,7 @@ namespace TcpTunnel.Client
                                 await receiveWindowQueueSemaphore.WaitAsync();
                             else if (!receiveWindowQueueSemaphore.Wait(0))
                                 break;
-                            if (receiveWindowQueue.TryDequeue(out e))
+                            if (!receiveWindowQueue.TryDequeue(out e))
                                 throw new InvalidOperationException();
 
                             checked
@@ -174,7 +174,7 @@ namespace TcpTunnel.Client
                         if (exit)
                             return;
 
-                        if (availableWindow >= DefaultWindowSize / 8)
+                        if (availableWindow >= InitialWindowSize / 8)
                             break;
 
                         // Insufficient window is available, so we need to wait.
