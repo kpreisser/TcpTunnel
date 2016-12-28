@@ -8,13 +8,22 @@ namespace TcpTunnel.Server
 {
     internal class Session
     {
-        public byte[] SessionID { get; }
+        public string Password { get; }
 
-        public List<ConnectionHandler> ActiveConnections { get; }
+        public long CurrentIteration { get; private set; }
 
-        public Session(byte[] sessionID)
+        public ConnectionHandler[] Clients { get; } = new ConnectionHandler[2];
+
+
+        public Session(string password)
         {
-            this.SessionID = sessionID;
+            this.Password = password;
+        }
+
+        public void UpdateIteration()
+        {
+            if (this.Clients[0] != null && this.Clients[1] != null)
+                this.CurrentIteration++;
         }
     }
 }

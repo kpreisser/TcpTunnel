@@ -54,7 +54,6 @@
     <Compile Include="Constants.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
-    <Compile Include="Server\Client.cs" />
     <Compile Include="Server\ConnectionHandler.cs" />
     <Compile Include="Server\Session.cs" />
     <Compile Include="Server\TcpTunnelServer.cs" />

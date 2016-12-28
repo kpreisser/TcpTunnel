@@ -30,7 +30,7 @@ namespace TcpTunnel.SocketInterfaces
             if (payloadLength < 0 || payloadLength > maxLength)
                 throw new InvalidDataException("Invalid frame length: " + payloadLength);
 
-            byte[] payloadBuf = new byte[payloadLength];
+            byte[] payloadBuf = new byte[payloadLength]; // TODO: Reuse array
             if (!await this.packetReader.ReadBytePacketAsync(new ArraySegment<byte>(payloadBuf)))
                 return null;
 

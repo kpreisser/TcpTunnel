@@ -29,5 +29,16 @@ namespace TcpTunnel.Utils
                 *(int*)(pBytes + offset) = i;
             }
         }
+
+        public static unsafe void ToBytes(long l, byte[] bytes, int offset)
+        {
+            if (offset < 0 || bytes.Length < offset + sizeof(long))
+                throw new ArgumentOutOfRangeException();
+
+            fixed (byte* pBytes = bytes)
+            {
+                *(long*)(pBytes + offset) = l;
+            }
+        }
     }
 }

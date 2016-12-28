@@ -19,17 +19,26 @@ namespace TcpTunnel.Server
 
         private readonly int port;
         private readonly X509Certificate2 certificate;
-        private readonly string[] endpoints;
         
-
         private TcpListener listener;
         private Task listenerTask;
         private List<SocketHandlerWrapper> activeHandlers = new List<SocketHandlerWrapper>();
         private bool stopped = false;
 
-        public TcpTunnelServer(int port, X509Certificate2 certificate, string[] endpoints)
+        internal SortedDictionary<int, Session> sessions { get; } =
+            new SortedDictionary<int, Session>();
+
+        internal object SyncRoot { get; } = new object();
+
+        public TcpTunnelServer(int port, X509Certificate2 certificate, IDictionary<int, string> endpoints)
         {
-            this.endpoints = endpoints;
+            this.port = port;
+            this.certificate = certificate;
+            this.sessions = new SortedDictionary<int, Session>();
+            foreach (var pair in endpoints)
+                this.sessions.Add(pair.Key, new Session(pair.Value));
+
+            this.listener = TcpListener.Create(port);
         }
 
         public void Start()
@@ -38,6 +47,17 @@ namespace TcpTunnel.Server
             listenerTask = Task.Run(async () =>
                 await ExceptionUtils.WrapTaskForHandlingUnhandledExceptions(RunListenerTask));
         }
+        
+        public void Stop()
+        {
+            Volatile.Write(ref stopped, true);
+            listener.Stop();
+
+            // Wait for the listener task.
+            listenerTask.Wait();
+            listenerTask.Dispose();
+        }
+
         private async Task RunListenerTask()
         {
             try
@@ -64,7 +84,7 @@ namespace TcpTunnel.Server
                     // soon as possible.
                     //client.NoDelay = true;
 
-                    var endpoint = new TcpClientEndpoint(client, true, true, ModifyStream);
+                    var endpoint = new TcpClientFramingEndpoint(client, true, true, ModifyStream);
                     ConnectionHandler handler = new ConnectionHandler(this, endpoint);
                     // Creating the wrapper and adding it to the dictionary needs to be
                     // done before actually starting the task to avoid a race.
@@ -147,16 +167,6 @@ namespace TcpTunnel.Server
         public void Dispose()
         {
             Stop();
-        }
-
-        public void Stop()
-        {
-            Volatile.Write(ref stopped, true);
-            listener.Stop();
-
-            // Wait for the listener task.
-            listenerTask.Wait();
-            listenerTask.Dispose();
         }
 
 
