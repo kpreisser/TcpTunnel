@@ -41,8 +41,8 @@ namespace TcpTunnel.SocketInterfaces
 
         public override async Task<ReceivedPacket> ReceiveNextPacketAsync(int maxLength)
         {
-            if (maxLength <= 0)
-                return null;
+            if (maxLength == 0)
+                return new ReceivedPacket(new ArraySegment<byte>(new byte[0]), ReceivedPacketType.Unknown);
 
             // Note: NetworkStream.Read(buf, offset, 0) does not return immediatly if no new data is available.
             int count = await stream.ReadAsync(readBuf, 0, maxLength == -1 ? readBuf.Length : Math.Min(readBuf.Length, maxLength));

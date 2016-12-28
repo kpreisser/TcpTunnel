@@ -18,7 +18,7 @@ namespace TcpTunnel.SocketInterfaces
             Func<NetworkStream, Task<Stream>> asyncStreamModifier = null) 
             : base(client, useSendQueue, usePingTimer, asyncStreamModifier)
         {
-            this.packetReader = new CompleteBytePacketReader(this);
+            this.packetReader = new CompleteBytePacketReader(base.ReceiveNextPacketAsync);
         }
 
         public override async Task<ReceivedPacket> ReceiveNextPacketAsync(int maxLength)

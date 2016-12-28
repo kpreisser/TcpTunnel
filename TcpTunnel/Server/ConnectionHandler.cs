@@ -98,6 +98,14 @@ namespace TcpTunnel.Server
                                                 //if (session.Clients[1 - clientIdx] != null)
                                                 //    session.Clients[1 - clientIdx].SendSessionStatus();
 
+                                                // Check if an old client is present. TODO: What should happen with that connection?
+                                                
+                                                if (session.Clients[clientIdx] != null)
+                                                {
+                                                    session.Clients[clientIdx].authenticatedSession = null;
+                                                    session.Clients[clientIdx] = null;
+                                                }
+
                                                 // Set the new client.
                                                 session.Clients[clientIdx] = this;
                                                 session.UpdateIteration();

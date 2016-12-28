@@ -102,8 +102,12 @@ namespace TcpTunnel.Server
                         await ExceptionUtils.WrapTaskForHandlingUnhandledExceptions(async () =>
                         {
                             try
-                            {
-                                await endpoint.RunEndpointAsync(handler.RunAsync);
+                            {                                
+                                await endpoint.RunEndpointAsync(async () =>
+                                {
+                                    await endpoint.InitializeAsync();
+                                    await handler.RunAsync();
+                                });
                             }
                             catch (Exception ex) when (ExceptionUtils.FilterException(ex))
                             {

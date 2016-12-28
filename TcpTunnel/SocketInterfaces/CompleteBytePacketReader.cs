@@ -19,11 +19,11 @@ namespace TcpTunnel.SocketInterfaces
     {
         private ArraySegment<byte>? currentSegment;
         private int currentSegmentPosition = 0;
-        private AbstractSocketEndpoint endpoint;
+        private Func<int, Task<ReceivedPacket>> receiveNextPacketAsync;
 
-        public CompleteBytePacketReader(AbstractSocketEndpoint endpoint)
+        public CompleteBytePacketReader(Func<int, Task<ReceivedPacket>> receiveNextPacketAsync)
         {
-            this.endpoint = endpoint;
+            this.receiveNextPacketAsync = receiveNextPacketAsync;
         }
 
         public async Task<bool> ReadBytePacketAsync(ArraySegment<byte> bytesToRead)
@@ -34,7 +34,7 @@ namespace TcpTunnel.SocketInterfaces
                 if (!currentSegment.HasValue)
                 {
                     // Read the next packet. We use -1 as maxLength because for the TcpClientEndpoint it uses a 8 KB buffer.
-                    var next = await endpoint.ReceiveNextPacketAsync(-1);
+                    var next = await receiveNextPacketAsync(-1);
                     if (next == null)
                         return false;
                     currentSegment = next.RawBytes;
