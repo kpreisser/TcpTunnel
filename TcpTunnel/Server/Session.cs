@@ -23,7 +23,12 @@ namespace TcpTunnel.Server
         public void UpdateIteration()
         {
             if (this.Clients[0] != null && this.Clients[1] != null)
-                this.CurrentIteration++;
+            {
+                unchecked
+                {
+                    this.CurrentIteration++;
+                }
+            }
         }
     }
 }

@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.CompilerServices;
+using System.Security.Authentication;
 using System.Text;
 using System.Threading.Tasks;
 
@@ -12,6 +13,8 @@ namespace TcpTunnel
         public const int ReceiveBufferSize = 32 * 1024;
 
         public const int SendBufferSize = 64 * 1024;
+
+        public const SslProtocols sslProtocols = SslProtocols.Tls12;
 
         public static readonly ArraySegment<byte> loginPrerequisiteBytes = new ArraySegment<byte>(new byte[]
         {

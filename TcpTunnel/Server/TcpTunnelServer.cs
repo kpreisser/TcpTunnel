@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Net.Security;
 using System.Net.Sockets;
+using System.Security.Authentication;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Threading;
@@ -15,7 +16,8 @@ namespace TcpTunnel.Server
 {
     internal class TcpTunnelServer
     {
-        public const int MaxSendBufferSize = 4 * 1024 * 1024;
+        public const int MaxReceivePacketSize = 2 * 1024 * 1024;
+        public const int MaxSendBufferSize = 5 * 1024 * 1024;
 
         private readonly int port;
         private readonly X509Certificate2 certificate;
@@ -84,7 +86,7 @@ namespace TcpTunnel.Server
                     // soon as possible.
                     //client.NoDelay = true;
 
-                    var endpoint = new TcpClientFramingEndpoint(client, true, true, ModifyStream);
+                    var endpoint = new TcpClientFramingEndpoint(client, true, true, ModifyStreamAsync);
                     ConnectionHandler handler = new ConnectionHandler(this, endpoint);
                     // Creating the wrapper and adding it to the dictionary needs to be
                     // done before actually starting the task to avoid a race.
@@ -154,7 +156,7 @@ namespace TcpTunnel.Server
             }
         }
 
-        private async Task<Stream> ModifyStream(NetworkStream s)
+        private async Task<Stream> ModifyStreamAsync(NetworkStream s)
         {
             if (this.certificate == null)
             {
@@ -163,7 +165,7 @@ namespace TcpTunnel.Server
             else
             {
                 var ssl = new SslStream(s);
-                await ssl.AuthenticateAsServerAsync(this.certificate, false, System.Security.Authentication.SslProtocols.Tls12, false);
+                await ssl.AuthenticateAsServerAsync(this.certificate, false, Constants.sslProtocols, false);
                 return ssl;
             }
         }

@@ -23,8 +23,6 @@ namespace TcpTunnel.Server
      */
     internal class ConnectionHandler
     {
-        private const int MaxReceivePacketSize = 2 * 1024 * 1024;
-
         private readonly TcpTunnelServer server;
         private readonly TcpClientFramingEndpoint endpoint;
 
@@ -45,7 +43,7 @@ namespace TcpTunnel.Server
             {
                 while (true)
                 {
-                    var packet = await this.endpoint.ReceiveNextPacketAsync(MaxReceivePacketSize);
+                    var packet = await this.endpoint.ReceiveNextPacketAsync(TcpTunnelServer.MaxReceivePacketSize);
                     if (packet == null)
                         return;
 
