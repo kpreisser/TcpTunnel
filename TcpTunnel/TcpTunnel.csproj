@@ -42,7 +42,9 @@
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="System" />
+    <Reference Include="System.Configuration.Install" />
     <Reference Include="System.Core" />
+    <Reference Include="System.ServiceProcess" />
     <Reference Include="System.Xml.Linq" />
     <Reference Include="System.Data.DataSetExtensions" />
     <Reference Include="Microsoft.CSharp" />
@@ -60,19 +62,33 @@
     <Compile Include="Server\ConnectionHandler.cs" />
     <Compile Include="Server\Session.cs" />
     <Compile Include="Server\TcpTunnelServer.cs" />
+    <Compile Include="ServiceSupport\ProjectInstaller.cs">
+      <SubType>Component</SubType>
+    </Compile>
+    <Compile Include="ServiceSupport\TcpTunnelService.cs">
+      <SubType>Component</SubType>
+    </Compile>
     <Compile Include="SocketInterfaces\AbstractSocketEndpoint.cs" />
     <Compile Include="SocketInterfaces\CompleteBytePacketReader.cs" />
     <Compile Include="SocketInterfaces\TcpClientEndpoint.cs" />
     <Compile Include="SocketInterfaces\TcpClientFramingEndpoint.cs" />
     <Compile Include="SocketInterfaces\WebSocketEndpoint.cs" />
+    <Compile Include="TcpTunnelRunner.cs" />
     <Compile Include="Utils\BitConverterUtils.cs" />
+    <Compile Include="Utils\CertificateUtils.cs" />
     <Compile Include="Utils\ExceptionUtils.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="App.config" />
     <None Include="app.manifest" />
   </ItemGroup>
-  <ItemGroup />
+  <ItemGroup>
+    <None Include="settings.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="clientsamplesettings.txt" />
+    <None Include="serverexamplesettings.txt" />
+  </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <!-- To modify your build process, add your task inside one of the targets below and uncomment it. 
        Other similar extension points exist, see Microsoft.Common.targets.

@@ -11,7 +11,7 @@ namespace TestFirstClient
     {
         static void Main(string[] args)
         {
-            TcpTunnelClient firstClient = new TcpTunnelClient("127.0.0.1", 23654, false, 15, "testPasswort", new Dictionary<int, string>()
+            TcpTunnelClient firstClient = new TcpTunnelClient("127.0.0.1", 39617, true, 15, "testPasswort", new Dictionary<int, string>()
             {
                 { 80, "www.preisser-it.de" }
             });

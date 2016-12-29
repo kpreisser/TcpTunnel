@@ -1,0 +1,7 @@
+﻿client
+localhost#                   Hostname
+23654#                       Port
+0#                           SSL
+15#                          Session-ID
+testPasswort#                Session-Password
+80,www.preisser-it.de

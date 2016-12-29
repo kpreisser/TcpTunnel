@@ -1,0 +1,4 @@
+﻿server
+39617#                       Port
+
+15,meinPasswort#             Session-ID and Passwort

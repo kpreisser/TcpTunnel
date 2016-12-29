@@ -32,12 +32,12 @@ namespace TcpTunnel.Server
 
         internal object SyncRoot { get; } = new object();
 
-        public TcpTunnelServer(int port, X509Certificate2 certificate, IDictionary<int, string> endpoints)
+        public TcpTunnelServer(int port, X509Certificate2 certificate, IDictionary<int, string> sessions)
         {
             this.port = port;
             this.certificate = certificate;
             this.sessions = new SortedDictionary<int, Session>();
-            foreach (var pair in endpoints)
+            foreach (var pair in sessions)
                 this.sessions.Add(pair.Key, new Session(pair.Value));
 
             this.listener = TcpListener.Create(port);
