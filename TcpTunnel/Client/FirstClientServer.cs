@@ -89,7 +89,8 @@ namespace TcpTunnel.Client
                 }
 
                 // Handle the client.
-                this.clientAcceptor(currentConnectionId++, client, portAndRemoteHost);
+                long newConnectionID = checked(currentConnectionId++);
+                this.clientAcceptor(newConnectionID, client, portAndRemoteHost);
             }
         }
     }
