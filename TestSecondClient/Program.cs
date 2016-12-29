@@ -3,15 +3,13 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
-using TcpTunnel.Server;
 
-namespace TcpTunnel
+namespace TestSecondClient
 {
     class Program
     {
         static void Main(string[] args)
         {
-
         }
     }
 }

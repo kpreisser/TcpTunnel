@@ -20,7 +20,7 @@ namespace TcpTunnel.Client
      * 8 bytes ConnectionID + 0x01 + arbitrary bytes: Transmit data packet or shutdown the connection if arbitrary bytes's length is 0.
      * 8 bytes ConnectionID + 0x02 + 4 bytes window size: Update receive window.
      */
-    internal class TcpTunnelClient
+    public class TcpTunnelClient
     {
         public const int MaxReceivePacketSize = 2 * 1024 * 1024;
         public const int MaxSendBufferSize = 5 * 1024 * 1024;

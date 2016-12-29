@@ -14,7 +14,7 @@ using TcpTunnel.Utils;
 
 namespace TcpTunnel.Server
 {
-    internal class TcpTunnelServer
+    public class TcpTunnelServer
     {
         public const int MaxReceivePacketSize = 2 * 1024 * 1024;
         public const int MaxSendBufferSize = 5 * 1024 * 1024;
