@@ -183,7 +183,7 @@ namespace TcpTunnel.Server
             byte[] response = new byte[2 + sizeof(long) + 1];
             response[0] = 0x00;
             response[1] = 0x02;
-            BitConverterUtils.ToBytes(this.authenticatedSession.CurrentIteration, response, 2);
+            BitConverterUtils.ToBytes(IPAddress.HostToNetworkOrder(this.authenticatedSession.CurrentIteration), response, 2);
             response[2 + sizeof(long)] = this.authenticatedSession.Clients[1 - clientIdx] != null ? (byte)0x00 : (byte)0x01;
             this.endpoint.SendMessageByQueue(response);
         }

@@ -77,7 +77,7 @@ namespace TcpTunnel.Client
                 if (this.tcpClient != null)
                 {
                     lock (this.tcpClient) {
-                        this.tcpClient.Client.Close(0);
+                        this.tcpClient.Client?.Close(0);
                         this.tcpClient.Close();   
                     }
                 }
@@ -121,6 +121,7 @@ namespace TcpTunnel.Client
                     }
 
                     var endpoint = new TcpClientFramingEndpoint(this.tcpClient, true, false, ModifyStreamAsync);
+                    await endpoint.InitializeAsync();
                     await endpoint.RunEndpointAsync(async () => await RunEndpointAsync(endpoint));
                 }
                 catch (Exception ex) when (ExceptionUtils.FilterException(ex))
@@ -128,6 +129,9 @@ namespace TcpTunnel.Client
                     // Ingore, and try again.
                     Debug.WriteLine(ex.ToString());
                 }
+
+                // Wait. TODO: Use a semaphore to exit faster.
+                await Task.Delay(3000);
             }
         }
 
@@ -171,14 +175,14 @@ namespace TcpTunnel.Client
                         + sizeof(int) + sessionPasswordBytes.Length];
                     loginString[0] = 0x00;
                     loginString[1] = 0x00;
-                    loginString[2] = firstClientPortsAndRemoteHostnames == null ? (byte)0x00 : (byte)0x01;
+                    loginString[2] = firstClientPortsAndRemoteHostnames != null ? (byte)0x00 : (byte)0x01;
                     Array.Copy(Constants.loginPrerequisiteBytes.Array, Constants.loginPrerequisiteBytes.Offset,
                         loginString, 3, Constants.loginPrerequisiteBytes.Count);
                     BitConverterUtils.ToBytes(IPAddress.HostToNetworkOrder(this.sessionID),
                         loginString, 3 + Constants.loginPrerequisiteBytes.Count);
                     Array.Copy(sessionPasswordBytes, 0, loginString,
                         3 + Constants.loginPrerequisiteBytes.Count + sizeof(int), sessionPasswordBytes.Length);
-                    endpoint.SendMessageByQueue(sessionPasswordBytes);
+                    endpoint.SendMessageByQueue(loginString);
 
                     // Start the ping timer task, then receive packets.
                     pingTimerTask = Task.Run(async () => await RunPingTaskAsync(pingTimerSemaphore, endpoint));
@@ -377,12 +381,6 @@ namespace TcpTunnel.Client
             long currentSessionIteration, long connectionID,
             TcpClient client, KeyValuePair<int, string> portAndRemoteHost)
         {
-            var connection = CreateTcpTunnelConnection(endpoint, currentSessionIteration, connectionID, client);
-            lock (this.SyncRoot)
-            {
-                this.activeConnections.Add(connectionID, connection);
-            }
-
             byte[] hostnameBytes = Encoding.UTF8.GetBytes(portAndRemoteHost.Value);
             var response = new byte[1 + sizeof(long) + sizeof(long) + 1 + sizeof(int) + hostnameBytes.Length];
             response[0] = 0x01;
@@ -395,6 +393,15 @@ namespace TcpTunnel.Client
                 1 + sizeof(long) + sizeof(long) + 1 + sizeof(int), hostnameBytes.Length);
 
             endpoint.SendMessageByQueue(response);
+
+            // Start the connection after sending the initialization because it runs at another task and might
+            // already send window updates or receive packets.
+            var connection = CreateTcpTunnelConnection(endpoint, currentSessionIteration, connectionID, client);
+            connection.Start();
+            lock (this.SyncRoot)
+            {
+                this.activeConnections.Add(connectionID, connection);
+            }
         }
     }
 }

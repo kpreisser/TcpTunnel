@@ -18,7 +18,7 @@ namespace TcpTunnel.Client
         private readonly Action<long, TcpClient, KeyValuePair<int, string>> clientAcceptor;
 
 
-        private List<Tuple<TcpListener, Task>> firstClientListeners;
+        private List<Tuple<TcpListener, Task>> firstClientListeners = new List<Tuple<TcpListener, Task>>();
 
         private bool stopped;
 

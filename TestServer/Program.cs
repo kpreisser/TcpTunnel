@@ -12,7 +12,7 @@ namespace TestServer
         static void Main(string[] args)
         {
             int port = 23654;
-            var server = new TcpTunnelServer(port, null, new Dictionary<int, string>() { { 1, "testPasswort" } });
+            var server = new TcpTunnelServer(port, null, new Dictionary<int, string>() { { 15, "testPasswort" } });
             server.Start();
             Console.WriteLine($"Server started at port {port}. Press key to stop.");
             Console.ReadKey();

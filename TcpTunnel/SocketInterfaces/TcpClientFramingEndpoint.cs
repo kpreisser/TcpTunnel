@@ -40,7 +40,7 @@ namespace TcpTunnel.SocketInterfaces
         protected override Task SendMessageInternalAsync(byte[] message, bool textMessage)
         {
             byte[] newFrame = new byte[4 + message.Length];
-            BitConverterUtils.ToBytes(IPAddress.HostToNetworkOrder(message.Length), newFrame, 4);
+            BitConverterUtils.ToBytes(IPAddress.HostToNetworkOrder(message.Length), newFrame, 0);
             Array.Copy(message, 0, newFrame, 4, message.Length);
             return base.SendMessageInternalAsync(newFrame, textMessage);
         }
