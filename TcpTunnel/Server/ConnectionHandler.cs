@@ -12,7 +12,7 @@ namespace TcpTunnel.Server
     /*
      * PROTOCOL (Frame Payload):
      * 0x00: Server Communication:
-     *    -> 0x00: (Client to Server) Authentication + Client-Type (0x00 or 0x01) + Login-Prerequisite-String + Session-Key
+     *    -> 0x00: (Client to Server) Authentication + Client-Type (0x00 or 0x01) + Login-Prerequisite-String + Session-ID (int) + Session-Password
      *    -> 0x01: (Server to Client) Authentication failed, try again.
      *    -> 0x02 + [8 bytes Session Iteration]: (Server to Client) Session Status (sent after successfull authentication and during runtime if status changes):
      *           -> 0x00: Remote client is available.

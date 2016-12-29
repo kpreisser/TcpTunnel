@@ -15,7 +15,7 @@ namespace TcpTunnel.Client
     {
         private readonly IDictionary<int, string> portsAndRemoteHostnames;
         private readonly TcpClientFramingEndpoint endpoint;
-        private readonly Action<TcpClient, KeyValuePair<int, string>> clientAcceptor;
+        private readonly Action<long, TcpClient, KeyValuePair<int, string>> clientAcceptor;
 
 
         private List<Tuple<TcpListener, Task>> firstClientListeners;
@@ -23,7 +23,7 @@ namespace TcpTunnel.Client
         private bool stopped;
 
         public FirstClientServer(IDictionary<int, string> portsAndRemoteHostnames, TcpClientFramingEndpoint endpoint,
-            Action<TcpClient, KeyValuePair<int, string>> clientAcceptor)
+            Action<long, TcpClient, KeyValuePair<int, string>> clientAcceptor)
         {
             this.portsAndRemoteHostnames = portsAndRemoteHostnames;
             this.endpoint = endpoint;
@@ -68,6 +68,8 @@ namespace TcpTunnel.Client
 
         private async Task RunListenerTask(TcpListener listener, KeyValuePair<int, string> portAndRemoteHost)
         {
+            long currentConnectionId = 0;
+
             while (true)
             {
                 TcpClient client;
@@ -87,7 +89,7 @@ namespace TcpTunnel.Client
                 }
 
                 // Handle the client.
-                this.clientAcceptor(client, portAndRemoteHost);
+                this.clientAcceptor(currentConnectionId++, client, portAndRemoteHost);
             }
         }
     }

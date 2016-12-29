@@ -2,7 +2,7 @@
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
-using System.Linq;
+using System.Net;
 using System.Net.Security;
 using System.Net.Sockets;
 using System.Security.Cryptography.X509Certificates;
@@ -14,6 +14,12 @@ using TcpTunnel.Utils;
 
 namespace TcpTunnel.Client
 {
+    /**
+     * Client to Client communication:
+     * 8 bytes ConnectionID + 0x00 + 4 bytes port + utf-8 string Host: Open a new connection.
+     * 8 bytes ConnectionID + 0x01 + arbitrary bytes: Transmit data packet or shutdown the connection if arbitrary bytes's length is 0.
+     * 8 bytes ConnectionID + 0x02 + 4 bytes window size: Update receive window.
+     */
     internal class TcpTunnelClient
     {
         public const int MaxReceivePacketSize = 2 * 1024 * 1024;
@@ -31,13 +37,21 @@ namespace TcpTunnel.Client
 
         private Task readTask;
         private TcpClient tcpClient;
-        private TcpClientFramingEndpoint endpoint;
         private bool stopped;
 
         public object SyncRoot { get; } = new object();
         
         private bool remoteClientAvailable;
+        private long currentIteration;
         private FirstClientServer currentServer;
+        /// <summary>
+        /// The dictionary of active connections. A connection is only removed if we manually abort them, or it the
+        /// connection's receive handler is called with an null array.
+        /// This list needs to be accesses with a lock, because it it may also be accessed from the TcpTunnelConnection's
+        /// receive tasks.
+        /// </summary>
+        private IDictionary<long, TcpTunnelConnection> activeConnections =
+            new SortedDictionary<long, TcpTunnelConnection>();
 
         public TcpTunnelClient(string hostname, int port, bool useSsl, int sessionID, string sessionPassword,
             IDictionary<int, string> firstClientPortsAndRemoteHostnames)
@@ -53,7 +67,6 @@ namespace TcpTunnel.Client
         public void Start()
         {
             this.readTask = Task.Run(async () => await ExceptionUtils.WrapTaskForHandlingUnhandledExceptions(RunReadTaskAsync));
-
         }
 
         public void Stop()
@@ -69,7 +82,8 @@ namespace TcpTunnel.Client
                     }
                 }
             }
-            
+
+            this.readTask.Wait();
         }
 
         private async Task RunReadTaskAsync()
@@ -107,7 +121,7 @@ namespace TcpTunnel.Client
                     }
 
                     var endpoint = new TcpClientFramingEndpoint(this.tcpClient, true, false, ModifyStreamAsync);
-                    await this.endpoint.RunEndpointAsync(async () => await RunEndpointAsync(endpoint));
+                    await endpoint.RunEndpointAsync(async () => await RunEndpointAsync(endpoint));
                 }
                 catch (Exception ex) when (ExceptionUtils.FilterException(ex))
                 {
@@ -148,16 +162,111 @@ namespace TcpTunnel.Client
         {
             using (var pingTimerSemaphore = new SemaphoreSlim(0))
             {
-                var pingTimerTask = Task.Run(async () => await RunPingTaskAsync(pingTimerSemaphore, endpoint));
+                Task pingTimerTask = null;
                 try
                 {
+                    // Send the login string.
+                    byte[] sessionPasswordBytes = Encoding.UTF8.GetBytes(this.sessionPassword);
+                    byte[] loginString = new byte[3 + Constants.loginPrerequisiteBytes.Count 
+                        + sizeof(int) + sessionPasswordBytes.Length];
+                    loginString[0] = 0x00;
+                    loginString[1] = 0x00;
+                    loginString[2] = firstClientPortsAndRemoteHostnames == null ? (byte)0x00 : (byte)0x01;
+                    Array.Copy(Constants.loginPrerequisiteBytes.Array, Constants.loginPrerequisiteBytes.Offset,
+                        loginString, 3, Constants.loginPrerequisiteBytes.Count);
+                    BitConverterUtils.ToBytes(IPAddress.HostToNetworkOrder(this.sessionID),
+                        loginString, 3 + Constants.loginPrerequisiteBytes.Count);
+                    Array.Copy(sessionPasswordBytes, 0, loginString,
+                        3 + Constants.loginPrerequisiteBytes.Count + sizeof(int), sessionPasswordBytes.Length);
+                    endpoint.SendMessageByQueue(sessionPasswordBytes);
+
+                    // Start the ping timer task, then receive packets.
+                    pingTimerTask = Task.Run(async () => await RunPingTaskAsync(pingTimerSemaphore, endpoint));
+                                    
                     while (true)
                     {
                         var packet = await endpoint.ReceiveNextPacketAsync(MaxReceivePacketSize);
                         if (packet == null)
                             return;
 
-                        // TODO
+                        if (packet.RawBytes.Count >= 2 + 8 + 1
+                            && packet.RawBytes.Array[packet.RawBytes.Offset + 0] == 0x00
+                            && packet.RawBytes.Array[packet.RawBytes.Offset + 1] == 0x02)
+                        {
+                            // Session Status
+                            HandleRemoteClientUnavailable();
+
+                            long currentSessionIteration = IPAddress.NetworkToHostOrder(BitConverter.ToInt64(
+                                packet.RawBytes.Array, packet.RawBytes.Offset + 2));
+                            this.currentIteration = currentSessionIteration;
+                            bool removeClientAvailable = packet.RawBytes.Array[packet.RawBytes.Offset + 2 + sizeof(long)] == 0x00;
+
+                            if (removeClientAvailable)
+                                HandleRemoteClientAvailable(endpoint, currentSessionIteration);
+                        }
+                        else if (packet.RawBytes.Count >= 1 + sizeof(long)
+                            && packet.RawBytes.Array[packet.RawBytes.Offset + 0] == 0x01)
+                        {
+                            // Client to client communication.
+                            long connectionID = IPAddress.NetworkToHostOrder(BitConverter.ToInt64(packet.RawBytes.Array,
+                                packet.RawBytes.Offset + 1));
+
+                            if (packet.RawBytes.Count >= 1 + sizeof(long) + 1 + sizeof(int) 
+                                && packet.RawBytes.Array[packet.RawBytes.Offset + 1 + sizeof(long)] == 0x00
+                                && firstClientPortsAndRemoteHostnames == null)
+                            {
+                                // Open a new connection, if we are not the first client.
+                                int port = IPAddress.NetworkToHostOrder(BitConverter.ToInt32(
+                                    packet.RawBytes.Array, packet.RawBytes.Offset + 1 + sizeof(long) + 1));
+                                string hostname = Encoding.UTF8.GetString(packet.RawBytes.Array,
+                                    packet.RawBytes.Offset + 1 + sizeof(long) + 1 + sizeof(int),
+                                    packet.RawBytes.Count - (1 + sizeof(long) + 1 + sizeof(int)));
+
+                                var remoteClient = new TcpClient();
+                                var connection = CreateTcpTunnelConnection(endpoint, this.currentIteration, connectionID,
+                                    remoteClient, async () => await remoteClient.ConnectAsync(hostname, port));
+                                connection.Start();
+
+                                // Add the connection.
+                                lock (this.SyncRoot)
+                                {
+                                    activeConnections.Add(connectionID, connection);
+                                }                                
+                            }
+                            else if (packet.RawBytes.Count >= 1 + sizeof(long) + 1
+                                && packet.RawBytes.Array[packet.RawBytes.Offset + 1 + sizeof(long)] == 0x01)
+                            {
+                                // Transmit the data packet (or shutdown the connection if the length is 0).
+                                // Need to copy the array because the caller might reuse the packet array.
+                                byte[] newPacket = new byte[packet.RawBytes.Count - 1 - sizeof(long) - 1];
+                                Array.Copy(packet.RawBytes.Array, packet.RawBytes.Offset + 1 + sizeof(long) + 1,
+                                    newPacket, 0, newPacket.Length);
+
+                                TcpTunnelConnection connection;
+                                lock (this.SyncRoot)
+                                {
+                                    if (!this.activeConnections.TryGetValue(connectionID, out connection))
+                                        connection = null;
+                                }
+                                connection?.EnqueuePacket(new ArraySegment<byte>(newPacket));
+                            }
+                            else if (packet.RawBytes.Count >= 1 + sizeof(long) + 1 + 4
+                                && packet.RawBytes.Array[packet.RawBytes.Offset + 1 + sizeof(long)] == 0x02)
+                            {
+                                // Update the receive window size.
+                                int windowSize = IPAddress.NetworkToHostOrder(BitConverter.ToInt32(packet.RawBytes.Array,
+                                    packet.RawBytes.Offset + 1 + sizeof(long) + 1));
+                                TcpTunnelConnection connection;
+                                lock (this.SyncRoot)
+                                {
+                                    if (!this.activeConnections.TryGetValue(connectionID, out connection))
+                                        connection = null;
+                                }
+                                connection?.UpdateReceiveWindow(windowSize);
+                            }
+
+                        }
+
                     }
                 }
                 finally
@@ -165,12 +274,57 @@ namespace TcpTunnel.Client
                     HandleRemoteClientUnavailable();
 
                     pingTimerSemaphore.Release();
-                    pingTimerTask.Wait();
+                    pingTimerTask?.Wait();
                 }
             }
         }
 
-        private void HandleRemoteClientAvailable()
+        private TcpTunnelConnection CreateTcpTunnelConnection(TcpClientFramingEndpoint endpoint,
+            long currentSessionIteration, long connectionID,
+            TcpClient remoteClient, Func<Task> connectHandler = null)
+        {
+            return new TcpTunnelConnection(remoteClient,
+                connectHandler,
+                (receivePacket) =>
+                {
+                    // Received a packet.
+                    byte[] response = new byte[1 + sizeof(long) + sizeof(long) + 1 + receivePacket.Count];
+                    response[0] = 0x01;
+                    BitConverterUtils.ToBytes(IPAddress.HostToNetworkOrder(currentSessionIteration), response, 1);
+                    BitConverterUtils.ToBytes(IPAddress.HostToNetworkOrder(connectionID), response, 1 + sizeof(long));
+                    response[1 + sizeof(long) + sizeof(long)] = 0x01;
+                    Array.Copy(receivePacket.Array, receivePacket.Offset, response,
+                        1 + sizeof(long) + sizeof(long) + 1, receivePacket.Count);
+
+                    endpoint.SendMessageByQueue(response);
+
+                    if (receivePacket.Count == 0)
+                    {
+                        // The connection has been closed, so remove it. The receive task might still run at this point,
+                        // but it doesn't raise any more events, it already closed the remoteClient, and the transmit task 
+                        // is also already finished at this point.
+                        lock (this.SyncRoot)
+                        {
+                            activeConnections.Remove(connectionID);
+                        }
+                    }
+                },
+                (window) =>
+                {
+                    // Got a transmit window update.
+                    byte[] response = new byte[1 + sizeof(long) + sizeof(long) + 1 + sizeof(int)];
+                    response[0] = 0x01;
+                    BitConverterUtils.ToBytes(IPAddress.HostToNetworkOrder(currentSessionIteration), response, 1);
+                    BitConverterUtils.ToBytes(IPAddress.HostToNetworkOrder(connectionID), response, 1 + sizeof(long));
+                    response[1 + sizeof(long) + sizeof(long)] = 0x02;
+                    BitConverterUtils.ToBytes(IPAddress.HostToNetworkOrder(window),
+                        response, 1 + sizeof(long) + sizeof(long) + 1);
+
+                    endpoint.SendMessageByQueue(response);
+                });
+        }
+
+        private void HandleRemoteClientAvailable(TcpClientFramingEndpoint endpoint, long currentSessionIteration)
         {
             if (!this.remoteClientAvailable)
             {
@@ -178,7 +332,9 @@ namespace TcpTunnel.Client
 
                 if (this.firstClientPortsAndRemoteHostnames != null)
                 {
-                    this.currentServer = new FirstClientServer(this.firstClientPortsAndRemoteHostnames, this.endpoint, AcceptFirstClientServerClient);
+                    this.currentServer = new FirstClientServer(this.firstClientPortsAndRemoteHostnames, endpoint,
+                        (connectionID, client, portAndRemoteHost) => AcceptFirstClientServerClient(
+                            endpoint, currentSessionIteration, connectionID, client, portAndRemoteHost));
                     this.currentServer.Start();
                 }
             }
@@ -196,13 +352,49 @@ namespace TcpTunnel.Client
                     this.currentServer = null;
                 }
 
-                // TODO Close Connections
+                // Close the connections.
+                // We need to copy the list since we wait for the connections to exit, and they might want
+                // to remove themselves from the list in the meanwhile.
+                var connectionsToWait = new List<KeyValuePair<long, TcpTunnelConnection>>();
+                lock (SyncRoot)
+                {
+                    connectionsToWait.AddRange(this.activeConnections);
+                }
+
+                foreach (var pair in connectionsToWait)
+                    pair.Value.Stop();
+
+                lock (SyncRoot)
+                {
+                    // Normally the dictionary should already be empty now.
+                    Debug.WriteLine(this.activeConnections.Count);
+                    this.activeConnections.Clear();
+                }
             }
         }
 
-        private void AcceptFirstClientServerClient(TcpClient client, KeyValuePair<int, string> portAndRemoteHost)
+        private void AcceptFirstClientServerClient(TcpClientFramingEndpoint endpoint,
+            long currentSessionIteration, long connectionID,
+            TcpClient client, KeyValuePair<int, string> portAndRemoteHost)
         {
+            var connection = CreateTcpTunnelConnection(endpoint, currentSessionIteration, connectionID, client);
+            lock (this.SyncRoot)
+            {
+                this.activeConnections.Add(connectionID, connection);
+            }
 
+            byte[] hostnameBytes = Encoding.UTF8.GetBytes(portAndRemoteHost.Value);
+            var response = new byte[1 + sizeof(long) + sizeof(long) + 1 + sizeof(int) + hostnameBytes.Length];
+            response[0] = 0x01;
+            BitConverterUtils.ToBytes(IPAddress.HostToNetworkOrder(currentSessionIteration), response, 1);
+            BitConverterUtils.ToBytes(IPAddress.HostToNetworkOrder(connectionID), response, 1 + sizeof(long));
+            response[1 + sizeof(long) + sizeof(long)] = 0x00;
+            BitConverterUtils.ToBytes(IPAddress.HostToNetworkOrder(portAndRemoteHost.Key),
+                response, 1 + sizeof(long) + sizeof(long) + 1);
+            Array.Copy(hostnameBytes, 0, response,
+                1 + sizeof(long) + sizeof(long) + 1 + sizeof(int), hostnameBytes.Length);
+
+            endpoint.SendMessageByQueue(response);
         }
     }
 }

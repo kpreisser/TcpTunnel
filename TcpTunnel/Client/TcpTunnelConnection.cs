@@ -81,7 +81,7 @@ namespace TcpTunnel.Client
 
         public void EnqueuePacket(ArraySegment<byte> packet)
         {
-            // Packet can be null to shutdown the connection after sending all enqueued packets.
+            // Packet's count can be 0 to shutdown the connection after sending all enqueued packets.
             lock (this.syncRoot)
             {
                 if (!transmitTaskStopped)
@@ -222,6 +222,10 @@ namespace TcpTunnel.Client
                     transmitTask.Dispose();
                 }
                 transmitPacketQueueSemaphore.Dispose();
+
+                // Invoke the receive handler with an empty array. We do this after waiting for the transmit task,
+                // to ensure the transmitWindowUpdateHandler is no more called at this point.
+                receiveHandler?.Invoke(new ArraySegment<byte>(new byte[0]));
             }
         }
 
@@ -236,7 +240,7 @@ namespace TcpTunnel.Client
                     if (!transmitPacketQueue.TryDequeue(out packet))
                         throw new InvalidOperationException();
 
-                    if (packet.Packet == null)
+                    if (packet.Packet.Count == 0)
                     {
                         // Close the connection and return.
                         lock (this.syncRoot)
