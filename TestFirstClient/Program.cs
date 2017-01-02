@@ -11,9 +11,9 @@ namespace TestFirstClient
     {
         static void Main(string[] args)
         {
-            TcpTunnelClient firstClient = new TcpTunnelClient("127.0.0.1", 39617, true, 15, "testPasswort", new Dictionary<int, string>()
+            TcpTunnelClient firstClient = new TcpTunnelClient("127.0.0.1", 39617, true, 15, "testPasswort", new List<TcpTunnelConnectionDescriptor>()
             {
-                { 80, "www.preisser-it.de" }
+                new TcpTunnelConnectionDescriptor(null, 8080, "www.preisser-it.de", 80)
             });
             firstClient.Start();
             Console.WriteLine($"Client started.");
