@@ -13,8 +13,6 @@ namespace TcpTunnel.Client
 {
     internal class TcpTunnelConnection
     {
-        private const int InitialWindowSize = 64 * 1024;
-
         private readonly TcpClient remoteClient;
         private NetworkStream remoteClientStream;
         // can be null if we don't need to connect
@@ -142,7 +140,7 @@ namespace TcpTunnel.Client
                     RunTransmitTaskAsync));
 
                 // Update the transmit window.
-                transmitWindowUpdateHandler?.Invoke(InitialWindowSize);
+                transmitWindowUpdateHandler?.Invoke(Constants.InitialWindowSize);
 
                 // Now start to receive.
                 byte[] receiveBuffer = new byte[Constants.ReceiveBufferSize];
@@ -174,7 +172,7 @@ namespace TcpTunnel.Client
                         if (exit)
                             return;
 
-                        if (availableWindow >= InitialWindowSize / 8)
+                        if (availableWindow >= Constants.InitialWindowSize / 8)
                             break;
 
                         // Insufficient window is available, so we need to wait.
