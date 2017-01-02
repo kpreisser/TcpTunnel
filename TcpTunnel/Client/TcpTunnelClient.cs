@@ -96,7 +96,10 @@ namespace TcpTunnel.Client
                     for (int i = 0; i < 2; i++)
                     {
                         bool useIpv6 = i == 0;
-                        var client = new TcpClient(useIpv6 ? AddressFamily.InterNetworkV6 : AddressFamily.InterNetwork);
+                        var client = new TcpClient(useIpv6 ? AddressFamily.InterNetworkV6 : AddressFamily.InterNetwork)
+                        {
+                            NoDelay = Constants.TcpClientNoDelay
+                        };
 
                         lock (this.SyncRoot)
                         {
@@ -226,7 +229,10 @@ namespace TcpTunnel.Client
                                     packet.RawBytes.Offset + 1 + sizeof(long) + 1 + sizeof(int),
                                     packet.RawBytes.Count - (1 + sizeof(long) + 1 + sizeof(int)));
 
-                                var remoteClient = new TcpClient();
+                                var remoteClient = new TcpClient()
+                                {
+                                    NoDelay = Constants.TcpClientNoDelay
+                                }
                                 var connection = CreateTcpTunnelConnection(endpoint, this.currentIteration, connectionID,
                                     remoteClient, async () => await remoteClient.ConnectAsync(hostname, port));
                                 connection.Start();

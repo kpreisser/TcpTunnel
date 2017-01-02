@@ -16,6 +16,8 @@ namespace TcpTunnel
 
         public const SslProtocols sslProtocols = SslProtocols.Tls12;
 
+        public const bool TcpClientNoDelay = true;
+
         #region Login Prerequisite String
 
         public static readonly ArraySegment<byte> loginPrerequisiteBytes = new ArraySegment<byte>(new byte[]

@@ -81,6 +81,7 @@ namespace TcpTunnel.Server
 
                         break;
                     }
+                    client.NoDelay = Constants.TcpClientNoDelay;
 
                     // Disable Nagle altorithm because we need frames to be sent to the client as
                     // soon as possible.

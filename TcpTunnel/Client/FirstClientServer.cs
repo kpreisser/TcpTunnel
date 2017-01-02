@@ -78,6 +78,7 @@ namespace TcpTunnel.Client
                 try
                 {
                     client = await listener.AcceptTcpClientAsync();
+                    client.NoDelay = Constants.TcpClientNoDelay;
                 }
                 catch (Exception ex) when (ExceptionUtils.FilterException(ex))
                 {
