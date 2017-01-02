@@ -1,1 +1,7 @@
-﻿
+﻿client
+localhost#                   Hostname
+23654#                       Port
+0#                           SSL
+15#                          Session-ID
+testPasswort#                Session-Password
+,8080,www.preisser-it.de,80# Entries: ListenIP (optional), ListenPort, RemoteHost, RemotePort

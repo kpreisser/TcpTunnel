@@ -232,7 +232,7 @@ namespace TcpTunnel.Client
                                 var remoteClient = new TcpClient()
                                 {
                                     NoDelay = Constants.TcpClientNoDelay
-                                }
+                                };
                                 var connection = CreateTcpTunnelConnection(endpoint, this.currentIteration, connectionID,
                                     remoteClient, async () => await remoteClient.ConnectAsync(hostname, port));
                                 connection.Start();
