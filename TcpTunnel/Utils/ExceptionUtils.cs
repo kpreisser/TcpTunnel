@@ -20,7 +20,7 @@ namespace TcpTunnel.Utils
 
         public static void HandleUnhandledException(Exception ex)
         {
-            Environment.FailFast("Unhandled Exception: " + ex.GetType() + ": " + ex.Message, ex);
+            Environment.FailFast("Unhandled Exception: " + ex.ToString(), ex);
         }
 
         /// <summary>

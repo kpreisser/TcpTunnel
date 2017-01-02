@@ -15,8 +15,10 @@ namespace TcpTunnel.Client
         private readonly TcpClientFramingEndpoint endpoint;
         private readonly Action<long, TcpClient, TcpTunnelConnectionDescriptor> clientAcceptor;
 
-
+        private readonly object syncRoot = new object();
         private List<Tuple<TcpListener, Task>> firstClientListeners = new List<Tuple<TcpListener, Task>>();
+        private long currentConnectionID = 0;
+        
 
         private bool stopped;
 
@@ -70,8 +72,6 @@ namespace TcpTunnel.Client
 
         private async Task RunListenerTask(TcpListener listener, TcpTunnelConnectionDescriptor portAndRemoteHost)
         {
-            long currentConnectionId = 0;
-
             while (true)
             {
                 TcpClient client;
@@ -92,7 +92,11 @@ namespace TcpTunnel.Client
                 }
 
                 // Handle the client.
-                long newConnectionID = checked(currentConnectionId++);
+                long newConnectionID;
+                lock (this.syncRoot)
+                {
+                    newConnectionID = checked(this.currentConnectionID++);
+                }
                 this.clientAcceptor(newConnectionID, client, portAndRemoteHost);
             }
         }
