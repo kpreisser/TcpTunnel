@@ -14,7 +14,7 @@ namespace TcpTunnel
 
         //public const int SendBufferSize = 64 * 1024;
 
-        public const int InitialWindowSize = 64 * 1024;
+        public const int InitialWindowSize = 256 * 1024;
 
         public const SslProtocols sslProtocols = SslProtocols.Tls12;
 

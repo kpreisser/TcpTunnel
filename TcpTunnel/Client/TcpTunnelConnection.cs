@@ -172,7 +172,7 @@ namespace TcpTunnel.Client
                         if (exit)
                             return;
 
-                        if (availableWindow >= Constants.InitialWindowSize / 8)
+                        if (availableWindow >= Constants.InitialWindowSize / 32)
                             break;
 
                         // Insufficient window is available, so we need to wait.
