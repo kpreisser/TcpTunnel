@@ -1,9 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.Linq;
 using System.Net.Sockets;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using TcpTunnel.SocketInterfaces;
@@ -13,19 +11,20 @@ namespace TcpTunnel.Client
 {
     internal class FirstClientServer
     {
-        private readonly IDictionary<int, string> portsAndRemoteHostnames;
+        private readonly IReadOnlyList<TcpTunnelConnectionDescriptor> connectionDescriptors;
         private readonly TcpClientFramingEndpoint endpoint;
-        private readonly Action<long, TcpClient, KeyValuePair<int, string>> clientAcceptor;
+        private readonly Action<long, TcpClient, TcpTunnelConnectionDescriptor> clientAcceptor;
 
 
         private List<Tuple<TcpListener, Task>> firstClientListeners = new List<Tuple<TcpListener, Task>>();
 
         private bool stopped;
 
-        public FirstClientServer(IDictionary<int, string> portsAndRemoteHostnames, TcpClientFramingEndpoint endpoint,
-            Action<long, TcpClient, KeyValuePair<int, string>> clientAcceptor)
+        public FirstClientServer(IReadOnlyList<TcpTunnelConnectionDescriptor> connectionDescriptors,
+            TcpClientFramingEndpoint endpoint,
+            Action<long, TcpClient, TcpTunnelConnectionDescriptor> clientAcceptor)
         {
-            this.portsAndRemoteHostnames = portsAndRemoteHostnames;
+            this.connectionDescriptors = connectionDescriptors;
             this.endpoint = endpoint;
             this.clientAcceptor = clientAcceptor;
         }
@@ -33,12 +32,15 @@ namespace TcpTunnel.Client
         public void Start()
         {
             // Create listeners.
-            foreach (var pair in this.portsAndRemoteHostnames)
+            foreach (var descriptor in this.connectionDescriptors)
             {
                 TcpListener listener;
                 try
                 {
-                    listener = TcpListener.Create(pair.Key);
+                    if (descriptor.ListenIP == null)
+                        listener = TcpListener.Create(descriptor.ListenPort);
+                    else
+                        listener = new TcpListener(descriptor.ListenIP, descriptor.ListenPort);
                     listener.Start();
                 }
                 catch (Exception ex) when (ExceptionUtils.FilterException(ex))
@@ -49,7 +51,7 @@ namespace TcpTunnel.Client
                 }
 
                 var listenerTask = Task.Run(async () => await ExceptionUtils.WrapTaskForHandlingUnhandledExceptions(
-                    async () => await RunListenerTask(listener, pair)));
+                    async () => await RunListenerTask(listener, descriptor)));
 
                 this.firstClientListeners.Add(new Tuple<TcpListener, Task>(listener, listenerTask));
             }
@@ -66,7 +68,7 @@ namespace TcpTunnel.Client
             }
         }
 
-        private async Task RunListenerTask(TcpListener listener, KeyValuePair<int, string> portAndRemoteHost)
+        private async Task RunListenerTask(TcpListener listener, TcpTunnelConnectionDescriptor portAndRemoteHost)
         {
             long currentConnectionId = 0;
 

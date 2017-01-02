@@ -33,7 +33,7 @@ namespace TcpTunnel.Client
         /// <summary>
         /// The first client is the one that provides server functionality by listening on specific ports.
         /// </summary>
-        private readonly IDictionary<int, string> firstClientPortsAndRemoteHostnames;
+        private readonly IReadOnlyList<TcpTunnelConnectionDescriptor> firstClientConnectionDescriptors;
 
         private Task readTask;
         private TcpClient tcpClient;
@@ -54,14 +54,14 @@ namespace TcpTunnel.Client
             new SortedDictionary<long, TcpTunnelConnection>();
 
         public TcpTunnelClient(string hostname, int port, bool useSsl, int sessionID, string sessionPassword,
-            IDictionary<int, string> firstClientPortsAndRemoteHostnames)
+            IReadOnlyList<TcpTunnelConnectionDescriptor> firstClientConnectionDescriptors)
         {
             this.hostname = hostname;
             this.port = port;
             this.useSsl = useSsl;
             this.sessionID = sessionID;
             this.sessionPassword = sessionPassword;
-            this.firstClientPortsAndRemoteHostnames = firstClientPortsAndRemoteHostnames;
+            this.firstClientConnectionDescriptors = firstClientConnectionDescriptors;
         }
 
         public void Start()
@@ -175,7 +175,7 @@ namespace TcpTunnel.Client
                         + sizeof(int) + sessionPasswordBytes.Length];
                     loginString[0] = 0x00;
                     loginString[1] = 0x00;
-                    loginString[2] = firstClientPortsAndRemoteHostnames != null ? (byte)0x00 : (byte)0x01;
+                    loginString[2] = firstClientConnectionDescriptors != null ? (byte)0x00 : (byte)0x01;
                     Array.Copy(Constants.loginPrerequisiteBytes.Array, Constants.loginPrerequisiteBytes.Offset,
                         loginString, 3, Constants.loginPrerequisiteBytes.Count);
                     BitConverterUtils.ToBytes(IPAddress.HostToNetworkOrder(this.sessionID),
@@ -217,7 +217,7 @@ namespace TcpTunnel.Client
 
                             if (packet.RawBytes.Count >= 1 + sizeof(long) + 1 + sizeof(int) 
                                 && packet.RawBytes.Array[packet.RawBytes.Offset + 1 + sizeof(long)] == 0x00
-                                && firstClientPortsAndRemoteHostnames == null)
+                                && firstClientConnectionDescriptors == null)
                             {
                                 // Open a new connection, if we are not the first client.
                                 int port = IPAddress.NetworkToHostOrder(BitConverter.ToInt32(
@@ -334,9 +334,9 @@ namespace TcpTunnel.Client
             {
                 this.remoteClientAvailable = true;
 
-                if (this.firstClientPortsAndRemoteHostnames != null)
+                if (this.firstClientConnectionDescriptors != null)
                 {
-                    this.currentServer = new FirstClientServer(this.firstClientPortsAndRemoteHostnames, endpoint,
+                    this.currentServer = new FirstClientServer(this.firstClientConnectionDescriptors, endpoint,
                         (connectionID, client, portAndRemoteHost) => AcceptFirstClientServerClient(
                             endpoint, currentSessionIteration, connectionID, client, portAndRemoteHost));
                     this.currentServer.Start();
@@ -350,7 +350,7 @@ namespace TcpTunnel.Client
             {
                 this.remoteClientAvailable = false;
 
-                if (this.firstClientPortsAndRemoteHostnames != null)
+                if (this.firstClientConnectionDescriptors != null)
                 {
                     this.currentServer.Stop();
                     this.currentServer = null;
@@ -379,15 +379,15 @@ namespace TcpTunnel.Client
 
         private void AcceptFirstClientServerClient(TcpClientFramingEndpoint endpoint,
             long currentSessionIteration, long connectionID,
-            TcpClient client, KeyValuePair<int, string> portAndRemoteHost)
+            TcpClient client, TcpTunnelConnectionDescriptor descriptor)
         {
-            byte[] hostnameBytes = Encoding.UTF8.GetBytes(portAndRemoteHost.Value);
+            byte[] hostnameBytes = Encoding.UTF8.GetBytes(descriptor.RemoteHost);
             var response = new byte[1 + sizeof(long) + sizeof(long) + 1 + sizeof(int) + hostnameBytes.Length];
             response[0] = 0x01;
             BitConverterUtils.ToBytes(IPAddress.HostToNetworkOrder(currentSessionIteration), response, 1);
             BitConverterUtils.ToBytes(IPAddress.HostToNetworkOrder(connectionID), response, 1 + sizeof(long));
             response[1 + sizeof(long) + sizeof(long)] = 0x00;
-            BitConverterUtils.ToBytes(IPAddress.HostToNetworkOrder(portAndRemoteHost.Key),
+            BitConverterUtils.ToBytes(IPAddress.HostToNetworkOrder(descriptor.RemotePort),
                 response, 1 + sizeof(long) + sizeof(long) + 1);
             Array.Copy(hostnameBytes, 0, response,
                 1 + sizeof(long) + sizeof(long) + 1 + sizeof(int), hostnameBytes.Length);

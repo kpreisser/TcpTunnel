@@ -3,10 +3,9 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
-using System.Linq;
+using System.Net;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
-using System.Threading.Tasks;
 using TcpTunnel.Client;
 using TcpTunnel.Server;
 using TcpTunnel.Utils;
@@ -70,20 +69,20 @@ namespace TcpTunnel
                 bool usessl = settingsLines[3] == "1" || settingsLines[3].ToLowerInvariant() == "true";
                 int sessionID = int.Parse(settingsLines[4], CultureInfo.InvariantCulture);
                 string sessionPassword = settingsLines[5];
-                IDictionary<int, string> hostPorts = new SortedDictionary<int, string>();
+                List<TcpTunnelConnectionDescriptor> descriptors = new List<TcpTunnelConnectionDescriptor>();
                 for (int i = 6; i < settingsLines.Length; i++)
                 {
                     string line = settingsLines[i];
-                    int commaIndex = line.IndexOf(",");
-                    if (commaIndex > 0)
-                    {
-                        int connectPort = int.Parse(line.Substring(0, commaIndex), CultureInfo.InvariantCulture);
-                        string connectHostname = line.Substring(commaIndex + 1);
-                        hostPorts.Add(connectPort, connectHostname);
-                    }
+                    string[] lineEntries = line.Split(new string[] { "," }, StringSplitOptions.None);
+                    IPAddress listenIP = lineEntries[0].Length == 0 ? null : IPAddress.Parse(lineEntries[0]);    
+                    int listenPort = int.Parse(lineEntries[1], CultureInfo.InvariantCulture);
+                    string remoteHost = lineEntries[2];
+                    int remotePort = int.Parse(lineEntries[3], CultureInfo.InvariantCulture);
+                    descriptors.Add(new Client.TcpTunnelConnectionDescriptor(listenIP, listenPort, remoteHost, remotePort));
+                    
                 }
 
-                this.client = new TcpTunnelClient(hostname, port, usessl, sessionID, sessionPassword, hostPorts.Count == 0 ? null : hostPorts);
+                this.client = new TcpTunnelClient(hostname, port, usessl, sessionID, sessionPassword, descriptors.Count == 0 ? null : descriptors);
                 this.client.Start();
             }
             else

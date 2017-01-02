@@ -4,4 +4,4 @@ localhost#                   Hostname
 0#                           SSL
 15#                          Session-ID
 testPasswort#                Session-Password
-80,www.preisser-it.de
+,8080,www.preisser-it.de,80# Entries: ListenIP (optional), ListenPort, RemoteHost, RemotePort
