@@ -229,6 +229,7 @@ namespace TcpTunnel.Client
                                     packet.RawBytes.Offset + 1 + sizeof(long) + 1 + sizeof(int),
                                     packet.RawBytes.Count - (1 + sizeof(long) + 1 + sizeof(int)));
 
+                                // TODO: Add support for IPv6
                                 var remoteClient = new TcpClient()
                                 {
                                     NoDelay = Constants.TcpClientNoDelay
