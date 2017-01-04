@@ -235,13 +235,14 @@ namespace TcpTunnel.Client
                                 };
                                 var connection = CreateTcpTunnelConnection(endpoint, this.currentIteration, connectionID,
                                     remoteClient, async () => await remoteClient.ConnectAsync(hostname, port));
-                                connection.Start();
-
                                 // Add the connection.
                                 lock (this.SyncRoot)
                                 {
                                     activeConnections.Add(connectionID, connection);
-                                }                                
+                                }
+
+                                // Start it only after adding it, because it may raise an event in which we will remove it.
+                                connection.Start();
                             }
                             else if (packet.RawBytes.Count >= 1 + sizeof(long) + 1
                                 && packet.RawBytes.Array[packet.RawBytes.Offset + 1 + sizeof(long)] == 0x01)
@@ -403,11 +404,12 @@ namespace TcpTunnel.Client
             // Start the connection after sending the initialization because it runs at another task and might
             // already send window updates or receive packets.
             var connection = CreateTcpTunnelConnection(endpoint, currentSessionIteration, connectionID, client);
-            connection.Start();
             lock (this.SyncRoot)
             {
                 this.activeConnections.Add(connectionID, connection);
             }
+            // Only start it after adding it, because it may raise an event in which we will remove it.
+            connection.Start();
         }
     }
 }
