@@ -212,7 +212,7 @@ namespace TcpTunnel.SocketInterfaces
                             if (!await packetReader.ReadBytePacketAsync(new ArraySegment<byte>(frameHeaderReceiveBuffer, 0, 2)))
                                 throw new InvalidDataException();
 
-                            payloadLength = checked((ushort)IPAddress.NetworkToHostOrder(BitConverter.ToInt16(frameHeaderReceiveBuffer, 0)));
+                            payloadLength = unchecked((ushort)IPAddress.NetworkToHostOrder(BitConverter.ToInt16(frameHeaderReceiveBuffer, 0)));
                             if (payloadLength < 126)
                                 throw new InvalidDataException();
                         }
