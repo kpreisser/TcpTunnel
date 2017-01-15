@@ -15,7 +15,7 @@ namespace TcpTunnel.SocketInterfaces
         private byte[] lengthBuf = new byte[4];
 
         public TcpClientFramingEndpoint(TcpClient client, bool useSendQueue, bool usePingTimer,
-            Func<NetworkStream, Task<Stream>> asyncStreamModifier = null) 
+            Func<NetworkStream, Task<Tuple<TcpClient, Stream>>> asyncStreamModifier = null) 
             : base(client, useSendQueue, usePingTimer, asyncStreamModifier)
         {
             this.packetReader = new CompleteBytePacketReader(base.ReceiveNextPacketAsync);

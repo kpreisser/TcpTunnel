@@ -17,26 +17,35 @@ namespace TcpTunnel.SocketInterfaces
     {
         private readonly object syncRoot = new object();
 
-        private readonly TcpClient client;
+        private TcpClient client;
         private Stream stream;
-        private Func<NetworkStream, Task<Stream>> asyncStreamModifier;
+        private Func<NetworkStream, Task<Tuple<TcpClient, Stream>>> asyncStreamModifier;
 
         private byte[] readBuf = new byte[Constants.ReceiveBufferSize];
 
         public TcpClientEndpoint(TcpClient client, bool useSendQueue, bool usePingTimer,
-            Func<NetworkStream, Task<Stream>> asyncStreamModifier = null)
+            Func<NetworkStream, Task<Tuple<TcpClient, Stream>>> asyncStreamModifier = null)
             : base(useSendQueue, usePingTimer)
         {
+            // We allow null as value if the func returns a TcpClient.
             this.client = client;
             this.asyncStreamModifier = asyncStreamModifier;
         }
         
         public override async Task InitializeAsync()
         {
-            var ns = this.client.GetStream();
+            var ns = this.client?.GetStream();
             this.stream = ns;
             if (asyncStreamModifier != null)
-                this.stream = await asyncStreamModifier(ns);
+            {
+                var tuple = await asyncStreamModifier(ns);
+                if (tuple?.Item1 != null)
+                    this.client = tuple.Item1;
+                if (tuple?.Item2 != null)
+                    this.stream = tuple.Item2;
+            }
+            if (this.client == null || this.stream == null)
+                throw new InvalidOperationException();
         }
 
         public override async Task<ReceivedPacket> ReceiveNextPacketAsync(int maxLength)

@@ -157,17 +157,17 @@ namespace TcpTunnel.Server
             }
         }
 
-        private async Task<Stream> ModifyStreamAsync(NetworkStream s)
+        private async Task<Tuple<TcpClient, Stream>> ModifyStreamAsync(NetworkStream s)
         {
             if (this.certificate == null)
             {
-                return s;
+                return new Tuple<TcpClient, Stream>(null, null);
             }
             else
             {
                 var ssl = new SslStream(s);
                 await ssl.AuthenticateAsServerAsync(this.certificate, false, Constants.sslProtocols, false);
-                return ssl;
+                return new Tuple<TcpClient, Stream>(null, ssl);
             }
         }
 

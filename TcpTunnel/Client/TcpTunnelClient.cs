@@ -138,18 +138,18 @@ namespace TcpTunnel.Client
             }
         }
 
-        private async Task<Stream> ModifyStreamAsync(NetworkStream ns)
+        private async Task<Tuple<TcpClient, Stream>> ModifyStreamAsync(NetworkStream ns)
         {
             if (this.useSsl)
             {
                 var ssl = new SslStream(ns);
                 await ssl.AuthenticateAsClientAsync(this.hostname, new X509CertificateCollection(),
                     Constants.sslProtocols, false);
-                return ssl;
+                return new Tuple<TcpClient, Stream>(null, ssl);
             }
             else
             {
-                return ns;
+                return new Tuple<TcpClient, Stream>(null, null);
             }
         }
 
