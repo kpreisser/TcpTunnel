@@ -231,10 +231,11 @@ namespace TcpTunnel.SocketInterfaces
                             throw new InvalidDataException("Max message length exceeded");
 
                         // Get the masking key.
-                        if (!await packetReader.ReadBytePacketAsync(new ArraySegment<byte>(frameHeaderReceiveBuffer, 0, 4)))
+                        var maskingKey = new ArraySegment<byte>(frameHeaderReceiveBuffer, 0, 4);
+                        if (!await packetReader.ReadBytePacketAsync(maskingKey))
                             throw new InvalidDataException();
 
-                        var maskingKey = new ArraySegment<byte>(frameHeaderReceiveBuffer, 0, 4);
+                        
 
                         // Receive the payload.
                         // TODO use a buffer array
