@@ -236,7 +236,6 @@ namespace TcpTunnel.SocketInterfaces
                             throw new InvalidDataException();
 
                         
-
                         // Receive the payload.
                         // TODO use a buffer array
                         byte[] payloadContent = new byte[payloadLength];
@@ -317,7 +316,7 @@ namespace TcpTunnel.SocketInterfaces
                 else if (payload.Count < 0x10000)
                 {
                     ms.WriteByte(126);
-                    ms.WriteByte((byte)((payload.Count >> 0x100) & 0xFF));
+                    ms.WriteByte((byte)((payload.Count >> 0x8) & 0xFF));
                     ms.WriteByte((byte)(payload.Count & 0xFF));
                 }
                 else
