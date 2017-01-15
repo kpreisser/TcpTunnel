@@ -74,6 +74,7 @@
     <Compile Include="SocketInterfaces\TcpClientEndpoint.cs" />
     <Compile Include="SocketInterfaces\TcpClientFramingEndpoint.cs" />
     <Compile Include="SocketInterfaces\WebSocketEndpoint.cs" />
+    <Compile Include="SocketInterfaces\WebsocketServerTcpEndpoint.cs" />
     <Compile Include="TcpTunnelRunner.cs" />
     <Compile Include="Utils\BitConverterUtils.cs" />
     <Compile Include="Utils\CertificateUtils.cs" />

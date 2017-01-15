@@ -84,15 +84,20 @@ namespace TcpTunnel.SocketInterfaces
         /// <returns></returns>
         public void SendMessageByQueue(string message, Action callback = null)
         {
-            SendMessageByQueue(TextMessageEncoding.GetBytes(message), true, callback);
+            SendMessageByQueue(new ArraySegment<byte>(TextMessageEncoding.GetBytes(message)), true, callback);
         }
 
         public void SendMessageByQueue(byte[] message, Action callback = null)
         {
+            SendMessageByQueue(new  ArraySegment<byte>(message), false, null);
+        }
+
+        public void SendMessageByQueue(ArraySegment<byte> message, Action callback = null)
+        {
             SendMessageByQueue(message, false, null);
         }
 
-        private void SendMessageByQueue(byte[] message, bool textMessage, Action callback)
+        private void SendMessageByQueue(ArraySegment<byte> message, bool textMessage, Action callback)
         {
             if (!useSendQueue)
                 throw new InvalidOperationException("Only blocking writes are supported.");
@@ -101,7 +106,7 @@ namespace TcpTunnel.SocketInterfaces
                 throw new ArgumentNullException();
 
             // If the size of queued messages is not too large, add the message to the queue.
-            int newQueueStrLength = Interlocked.Add(ref messageQueueStringLength, message.Length);
+            int newQueueStrLength = Interlocked.Add(ref messageQueueStringLength, message.Count);
             if (newQueueStrLength > MaxClientMessageQueueByteLength)
             {
                 // The queue is too large. Abort the connection; and ensure the SendTask does not send
@@ -136,15 +141,15 @@ namespace TcpTunnel.SocketInterfaces
         /// <param name="message"></param>
         public Task SendMessageAsync(string message)
         {
-            return SendMessageAsync(TextMessageEncoding.GetBytes(message), true);
+            return SendMessageAsync(new ArraySegment<byte>(TextMessageEncoding.GetBytes(message)), true);
         }
 
-        public Task SendMessageAsync(byte[] message)
+        public Task SendMessageAsync(ArraySegment<byte> message)
         {
             return SendMessageAsync(message, false);
         }
 
-        private async Task SendMessageAsync(byte[] message, bool textMessage)
+        private async Task SendMessageAsync(ArraySegment<byte> message, bool textMessage)
         {
             if (useSendQueue)
                 throw new InvalidOperationException("Only non-blocking writes are supported.");
@@ -191,7 +196,7 @@ namespace TcpTunnel.SocketInterfaces
                         // Call the callback before sending the message.
                         el.Callback?.Invoke();
 
-                        Interlocked.Add(ref messageQueueStringLength, -el.Message.Length);
+                        Interlocked.Add(ref messageQueueStringLength, -el.Message.Count);
 
                         try
                         {
@@ -244,7 +249,7 @@ namespace TcpTunnel.SocketInterfaces
         /// </summary>
         /// <param name="message"></param>
         /// <returns></returns>
-        protected abstract Task SendMessageInternalAsync(byte[] message, bool textMessage);
+        protected abstract Task SendMessageInternalAsync(ArraySegment<byte> message, bool textMessage);
 
         /// <summary>
         /// Closes the connection. This will block until the close frame has been sent.
@@ -366,7 +371,7 @@ namespace TcpTunnel.SocketInterfaces
         private struct MessageQueueElement
         {
             public Action Callback;
-            public byte[] Message;
+            public ArraySegment<byte> Message;
             public bool TextMessage;
             public bool QueueEndElement;
             public bool CloseConnection;

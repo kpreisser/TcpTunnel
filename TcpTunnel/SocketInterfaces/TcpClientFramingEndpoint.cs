@@ -37,12 +37,12 @@ namespace TcpTunnel.SocketInterfaces
             return new ReceivedPacket(new ArraySegment<byte>(payloadBuf), ReceivedPacketType.ByteMessage);
         }
 
-        protected override Task SendMessageInternalAsync(byte[] message, bool textMessage)
+        protected override Task SendMessageInternalAsync(ArraySegment<byte> message, bool textMessage)
         {
-            byte[] newFrame = new byte[4 + message.Length];
-            BitConverterUtils.ToBytes(IPAddress.HostToNetworkOrder(message.Length), newFrame, 0);
-            Array.Copy(message, 0, newFrame, 4, message.Length);
-            return base.SendMessageInternalAsync(newFrame, textMessage);
+            byte[] newFrame = new byte[4 + message.Count];
+            BitConverterUtils.ToBytes(IPAddress.HostToNetworkOrder(message.Count), newFrame, 0);
+            Array.Copy(message.Array, message.Offset, newFrame, 4, message.Count);
+            return base.SendMessageInternalAsync(new ArraySegment<byte>(newFrame), textMessage);
         }
     }
 }

@@ -88,14 +88,12 @@ namespace TcpTunnel.SocketInterfaces
         }
 
         // We only support binary messages.
-        protected override async Task SendMessageInternalAsync(byte[] message, bool textMessage)
+        protected override async Task SendMessageInternalAsync(ArraySegment<byte> message, bool textMessage)
         {
             if (textMessage)
                 throw new ArgumentException("Only binary messages are supported with the TcpClientEndpoint.");
 
-            await stream.WriteAsync(message, 0, message.Length);
+            await stream.WriteAsync(message.Array, message.Offset, message.Count);
         }
-
-
     }
 }

@@ -78,11 +78,9 @@ namespace TcpTunnel.SocketInterfaces
         }
 
         
-        protected override async Task SendMessageInternalAsync(byte[] message, bool textMessage)
+        protected override async Task SendMessageInternalAsync(ArraySegment<byte> message, bool textMessage)
         {
-            ArraySegment<byte> segm = new ArraySegment<byte>(message);
-
-            await ws.SendAsync(segm, textMessage ? WebSocketMessageType.Text : WebSocketMessageType.Binary, 
+            await ws.SendAsync(message, textMessage ? WebSocketMessageType.Text : WebSocketMessageType.Binary, 
                 true, CancellationToken.None);
                 
         }
