@@ -32,6 +32,7 @@ namespace TcpTunnel.Server
 
         internal object SyncRoot { get; } = new object();
 
+
         public TcpTunnelServer(int port, X509Certificate2 certificate, IDictionary<int, string> sessions)
         {
             this.port = port;
@@ -43,22 +44,24 @@ namespace TcpTunnel.Server
             this.listener = TcpListener.Create(port);
         }
 
+
         public void Start()
         {
-            listener.Start();
-            listenerTask = Task.Run(async () =>
+            this.listener.Start();
+            this.listenerTask = Task.Run(async () =>
                 await ExceptionUtils.WrapTaskForHandlingUnhandledExceptions(RunListenerTask));
         }
         
         public void Stop()
         {
-            Volatile.Write(ref stopped, true);
-            listener.Stop();
+            Volatile.Write(ref this.stopped, true);
+            this.listener.Stop();
 
             // Wait for the listener task.
-            listenerTask.Wait();
-            listenerTask.Dispose();
+            this.listenerTask.Wait();
+            this.listenerTask.Dispose();
         }
+
 
         private async Task RunListenerTask()
         {
@@ -69,39 +72,36 @@ namespace TcpTunnel.Server
                     TcpClient client;
                     try
                     {
-                        client = await listener.AcceptTcpClientAsync();
+                        client = await this.listener.AcceptTcpClientAsync();
                     }
                     catch (Exception ex) when (ExceptionUtils.FilterException(ex))
                     {
-                        // Can be a SocketException or an ObjectDisposedException.
-                        // Need to break out of the loop.
-                        // However, if stopped is not set to true, it is another error so rethrow it.
-                        if (!Volatile.Read(ref stopped))
-                            throw;
+                        // Check if the error occured because we need to stop.
+                        if (Volatile.Read(ref this.stopped))
+                            break;
 
-                        break;
+                        // It is another error, so ignore it. This can sometimes happen when the
+                        // client closed the connection directly after accepting it.
+                        continue;
                     }
+
                     client.NoDelay = Constants.TcpClientNoDelay;
 
-                    // Disable Nagle altorithm because we need frames to be sent to the client as
-                    // soon as possible.
-                    //client.NoDelay = true;
-
                     var endpoint = new TcpClientFramingEndpoint(client, true, true, ModifyStreamAsync);
-                    ConnectionHandler handler = new ConnectionHandler(this, endpoint);
+                    var handler = new ConnectionHandler(this, endpoint);
                     // Creating the wrapper and adding it to the dictionary needs to be
                     // done before actually starting the task to avoid a race.
-                    SocketHandlerWrapper wrp = new SocketHandlerWrapper()
+                    var wrp = new SocketHandlerWrapper()
                     {
                          client = endpoint
                     };
-                    lock (activeHandlers)
+                    lock (this.activeHandlers)
                     {
-                        activeHandlers.Add(wrp);
+                        this.activeHandlers.Add(wrp);
                     }
 
                     // Start a task to handle the endpoint.
-                    Task runTask = Task.Run(async () =>
+                    var runTask = Task.Run(async () =>
                         await ExceptionUtils.WrapTaskForHandlingUnhandledExceptions(async () =>
                         {
                             try
@@ -119,10 +119,10 @@ namespace TcpTunnel.Server
                             }
                             finally
                             {
-                                lock (activeHandlers)
+                                lock (this.activeHandlers)
                                 {
                                     // Remove the handler.
-                                    activeHandlers.Remove(wrp);
+                                    this.activeHandlers.Remove(wrp);
                                 }
                             }
                         }));
@@ -135,10 +135,10 @@ namespace TcpTunnel.Server
                 // Need to add the tasks in a separate list, because we cannot wait for them while we
                 // hold the lock for activeHandlers, otherwise a deadlock might occur because the handlers
                 // also remove themselves from that dictionary.
-                List<Task> tasksToWaitFor = new List<Task>();
-                lock (activeHandlers)
+                var tasksToWaitFor = new List<Task>();
+                lock (this.activeHandlers)
                 {
-                    foreach (SocketHandlerWrapper cl in activeHandlers)
+                    foreach (var cl in this.activeHandlers)
                     {
                         cl.client.Abort();
                         tasksToWaitFor.Add(cl.handlerTask);
@@ -149,7 +149,7 @@ namespace TcpTunnel.Server
                 // Note: This is not quite clean because as the tasks remove themselves from the dictionary,
                 // a task might still be active although it is not in the dictionary any more.
                 // However this is OK because the task doesn't do anything after that point.
-                foreach (Task t in tasksToWaitFor)
+                foreach (var t in tasksToWaitFor)
                 {
                     t.Wait();
                     t.Dispose();
