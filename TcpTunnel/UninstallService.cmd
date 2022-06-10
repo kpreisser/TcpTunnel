@@ -1,1 +1,2 @@
 sc delete TcpTunnel
+@pause

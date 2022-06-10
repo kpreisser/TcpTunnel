@@ -1,1 +1,2 @@
-sc create TcpTunnel binpath= "%~dp0\TcpTunnel.exe -service" start=delayed-auto
+sc create TcpTunnel binpath= "%~dp0TcpTunnel.exe -service" start=delayed-auto
+@pause
