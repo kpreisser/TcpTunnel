@@ -12,4 +12,13 @@
     <Reference Include="System.ServiceProcess" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Update="InstallService.cmd">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="UninstallService.cmd">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
 </Project>
