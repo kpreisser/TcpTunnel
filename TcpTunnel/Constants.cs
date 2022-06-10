@@ -22,6 +22,17 @@ namespace TcpTunnel
 
         #region Login Prerequisite String
 
+        /// <summary>
+        /// A publicly-known "string" (byte-array) that must be sent along with login credentials,
+        /// in order to reduce the possible frequency of network brute-force attacks.
+        /// </summary>
+        /// <remarks>
+        /// In order to authenticate, the remote party must send this string along with its
+        /// credentials. The host will only perform authentication if it received this string.
+        /// Due to the number of bytes this string takes, an attacker can only send a lot less
+        /// authentication requests for a specific given of bytes than without this string,
+        /// this reducing the number of possible brute force attacks for a given throughput.
+        /// </remarks>
         public static readonly ArraySegment<byte> loginPrerequisiteBytes = new ArraySegment<byte>(new byte[]
         {
             0x0F, 0xE8, 0x55, 0xF7, 0xF5, 0x03, 0x11, 0x9B, 0x21, 0x61, 0x04, 0xD3, 0x04, 0xB2, 0x5C, 0x73,
