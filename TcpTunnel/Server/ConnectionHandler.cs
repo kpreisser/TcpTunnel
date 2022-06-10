@@ -60,9 +60,10 @@ namespace TcpTunnel.Server
                                 // Authentication.
                                 bool firstClient = packet.RawBytes.Array[packet.RawBytes.Offset + 2] == 0x00;
 
-                                ArraySegment<byte> clientPrerequisite = new ArraySegment<byte>(packet.RawBytes.Array,
+                                var clientPrerequisite = new ArraySegment<byte>(packet.RawBytes.Array,
                                     packet.RawBytes.Offset + 3, Constants.loginPrerequisiteBytes.Count);
-                                if (Constants.ComparePassword(clientPrerequisite, Constants.loginPrerequisiteBytes))
+
+                                if (Constants.ConstantTimeEquals(clientPrerequisite, Constants.loginPrerequisiteBytes))
                                 {
                                     int sessionID = IPAddress.NetworkToHostOrder(BitConverter.ToInt32(
                                         packet.RawBytes.Array, packet.RawBytes.Offset + 3 + Constants.loginPrerequisiteBytes.Count));
@@ -80,7 +81,8 @@ namespace TcpTunnel.Server
                                             byte[] enteredPassword = Encoding.Unicode.GetBytes(sessionPassword);
                                             byte[] correctPassword = Encoding.Unicode.GetBytes(session.Password);
 
-                                            if (Constants.ComparePassword(new ArraySegment<byte>(enteredPassword),
+                                            if (Constants.ConstantTimeEquals(
+                                                new ArraySegment<byte>(enteredPassword),
                                                 new ArraySegment<byte>(correctPassword)))
                                             {
                                                 this.authenticatedSession = session;
