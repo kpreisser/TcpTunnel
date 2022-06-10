@@ -284,28 +284,54 @@ namespace TcpTunnel
 
         #endregion
 
-        [MethodImpl(MethodImplOptions.NoOptimization)]
-        public static bool ComparePassword(ArraySegment<byte> enteredPassword, ArraySegment<byte> correctPasswort)
+        /// <summary>
+        /// Checks two secrets/passwords stored in byte arrays for equality in constant
+        /// time.
+        /// This method should be used instead of a string comparison to check a
+        /// password entered by a user to avoid timing attacks (as the string
+        /// comparison would return on the first incorrect character).
+        /// </summary>
+        /// <remarks>
+        /// This method iterates over all of the bytes before returning, regardless of
+        /// whether the previous character were correct, and doesn't use conditional
+        /// commands like "if" which might also introduce timing attack vectors.
+        /// 
+        /// Note: An attacker can still get the length of the password.
+        /// 
+        /// This method is marked with <see cref="MethodImplOptions.NoOptimization"/>
+        /// so that the compiler doesn't optimize it, to ensure that there aren't new
+        /// timing attack vectors introduced by the optimization.
+        /// </remarks>
+        /// <param name="enteredPassword"></param>
+        /// <param name="correctPasswort"></param>
+        /// <returns></returns>
+        [MethodImpl(MethodImplOptions.NoInlining | MethodImplOptions.NoOptimization)]
+        public static bool ConstantTimeEquals(
+                ArraySegment<byte> enteredPassword,
+                ArraySegment<byte> correctPasswort)
         {
-            if (enteredPassword.Count != correctPasswort.Count)
-                return false;
-
-            bool ok = true;
-
-            for (int i = 0; i < enteredPassword.Count; i++)
-            {
-                if (enteredPassword.Array[enteredPassword.Offset + i] != correctPasswort.Array[correctPasswort.Offset + i])
-                {
-                    ok = false & ok;
-                    // kein Return!! Wal des muss komplett durchlaufen, um Timing-Attacken zu verhindern.
-                }
-                else
-                {
-                    ok = true & ok;
-                }
+#if NETSTANDARD2_0 || NETFRAMEWORK
+            // Note that we cannot use "if" statements here as they translate to
+            // conditional commands, which would destroy the constant-time
+            // promise.
+            // From https://www.imperialviolet.org/2013/02/04/luckythirteen.html:
+            // "Finally, the MAC should be compared in constant time by ORing a 
+            // value with the XOR of each byte in place from the calculated and 
+            // given MACs. If the result is zero, then the record is valid."
+            int result = enteredPassword.Count ^ correctPasswort.Count;
+            for (int i = 0; i < enteredPassword.Count && i < correctPasswort.Count; i++) {
+                result |=
+                        correctPasswort.Array[correctPasswort.Offset + i] ^
+                        enteredPassword.Array[enteredPassword.Offset + i];
             }
 
-            return ok;
+            // The arrays are only equal if result is exactly 0.
+            return result == 0;
+#else
+            return CryptographicOperations.FixedTimeEquals(
+                    enteredPassword,
+                    correctPasswort);
+#endif
         }
     }
 }
