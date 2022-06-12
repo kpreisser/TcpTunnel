@@ -140,7 +140,7 @@ internal class ServerConnectionHandler
 
                                     this.server.Logger?.Invoke(
                                         $"Client '{this.clientEndpoint}' authenticated for Session ID '{sessionId}' " +
-                                        $"({(this.firstClient ? "proxy-listener" : "proxy-client")}).");
+                                        $"({(firstClient ? "proxy-listener" : "proxy-client")}).");
 
                                     // Enter the lock again. We don't need to check whether
                                     // authenticatedSession is still null, as it can only be
