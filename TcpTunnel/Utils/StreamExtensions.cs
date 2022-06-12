@@ -15,20 +15,20 @@ internal static class StreamExtensions
     {
         bool firstIteration = true;
 
-        while (buffer.Length > 0)
+        do
         {
             int read = await stream.ReadAsync(buffer, cancellationToken)
                 .ConfigureAwait(false);
 
-            if (firstIteration && read is 0 && allowEndOfStream)
+            if (read is 0 && buffer.Length > 0 && allowEndOfStream && firstIteration)
                 return false;
-            else if (read is 0)
+            else if (read is 0 && buffer.Length > 0)
                 throw new EndOfStreamException();
 
             firstIteration = false;
-
             buffer = buffer[read..];
         }
+        while (buffer.Length > 0);
 
         return true;
     }
