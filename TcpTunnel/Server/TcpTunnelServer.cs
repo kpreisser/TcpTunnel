@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
@@ -44,23 +45,26 @@ public class TcpTunnelServer
         this.certificate = certificate;
         this.logger = logger;
 
-        this.Sessions = new SortedDictionary<int, Session>();
+        this.SyncRoot = new();
+
+        var sessionDictionary = new Dictionary<int, Session>();
+        this.Sessions = sessionDictionary;
 
         foreach (var pair in sessions)
-            this.Sessions.Add(pair.Key, new Session(Encoding.UTF8.GetBytes(pair.Value)));
+            sessionDictionary.Add(pair.Key, new Session(Encoding.UTF8.GetBytes(pair.Value)));
 
         this.listener = TcpListener.Create(port);
     }
 
-    internal SortedDictionary<int, Session> Sessions
+    internal IReadOnlyDictionary<int, Session> Sessions
     {
         get;
-    } = new();
+    }
 
     internal object SyncRoot
     {
         get;
-    } = new();
+    }
 
     internal Action<string>? Logger
     {

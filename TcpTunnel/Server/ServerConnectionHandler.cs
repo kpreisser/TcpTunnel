@@ -35,8 +35,8 @@ internal class ServerConnectionHandler
     private int sessionIterationsToAcknowledge;
 
     public ServerConnectionHandler(
-        TcpTunnelServer server, 
-        TcpClientFramingEndpoint endpoint, 
+        TcpTunnelServer server,
+        TcpClientFramingEndpoint endpoint,
         SystemNetEndpoint clientEndpoint)
     {
         this.server = server;
@@ -67,9 +67,49 @@ internal class ServerConnectionHandler
                 this.endpoint.HandlePing();
                 var packetBuffer = packet.Value.Buffer;
 
-                if (this.authenticatedSession is null)
+                bool sessionWasAuthenticated;
+                lock (this.server.SyncRoot)
                 {
-                    // Only allow authentication packets.
+                    // Need to access the field within the lock, as it might be changed by
+                    // a different connection handler.
+                    sessionWasAuthenticated = this.authenticatedSession is not null;
+
+                    if (sessionWasAuthenticated)
+                    {
+                        if (packetBuffer.Length >= 1 && packetBuffer.Span[0] is 0x03)
+                        {
+                            // Acknowledge the current session iteration.
+                            if (this.sessionIterationsToAcknowledge <= 0)
+                                throw new InvalidOperationException(); // Invalid message
+
+                            this.sessionIterationsToAcknowledge--;
+                        }
+                        else if (packetBuffer.Length >= 1 &&
+                            packetBuffer.Span[0] is Constants.TypeClientToClientCommunication)
+                        {
+                            // Client-to-client communication.
+                            int clientIdx = this.ClientIdx;
+
+                            // Forward the packet to the partner client, if available and if
+                            // the current client has acknowledged the current session iteration.
+                            if (this.authenticatedSession!.Clients[1 - clientIdx] is not null &&
+                                this.sessionIterationsToAcknowledge is 0)
+                            {
+                                // Need to copy the data because it will be queued (and the buffer
+                                // may be reused by the caller).
+                                var resultPacket = packetBuffer.ToArray();
+                                this.authenticatedSession.Clients[1 - clientIdx]!.endpoint.SendMessageByQueue(
+                                    resultPacket);
+                            }
+                        }
+                    }
+                }
+
+                if (!sessionWasAuthenticated)
+                {
+                    // Only allow authentication packets. Because we might need to do a
+                    // (possibly expensive) authentication, we run this code outside of the
+                    // lock, until we could actually authenticate the client.
                     if (packetBuffer.Length >= 2 + Constants.loginPrerequisiteBytes.Length + sizeof(int) &&
                         packetBuffer.Span[0] is 0x00)
                     {
@@ -77,6 +117,7 @@ internal class ServerConnectionHandler
                         bool firstClient = packetBuffer.Span[1] is 0x00;
                         var clientPrerequisite = packetBuffer[2..][..Constants.loginPrerequisiteBytes.Length];
 
+                        bool couldAuthenticate = false;
                         if (clientPrerequisite.Span.SequenceEqual(Constants.loginPrerequisiteBytes.Span))
                         {
                             int sessionId = BinaryPrimitives.ReadInt32BigEndian(
@@ -85,26 +126,32 @@ internal class ServerConnectionHandler
                                 [(2 + Constants.loginPrerequisiteBytes.Length + sizeof(int))..];
 
                             // Check if the session exists.
-                            lock (this.server.SyncRoot)
+                            if (this.server.Sessions.TryGetValue(sessionId, out var session))
                             {
-                                if (this.server.Sessions.TryGetValue(sessionId, out var session))
+                                // Verify the session password. For this, we need to
+                                // use FixedTimeEquals to prevent timing attacks.
+                                if (CryptographicOperations.FixedTimeEquals(
+                                    enteredPasswordBytes.Span,
+                                    session.PasswordBytes.Span))
                                 {
-                                    // Verify the session password. For this, we need to
-                                    // use FixedTimeEquals to prevent timing attacks.
-                                    if (CryptographicOperations.FixedTimeEquals(
-                                        enteredPasswordBytes.Span,
-                                        session.PasswordBytes.Span))
+                                    // Client authenticated successfully for the given
+                                    // session ID.
+                                    couldAuthenticate = true;
+
+                                    this.server.Logger?.Invoke(
+                                        $"Client '{this.clientEndpoint}' authenticated for Session ID '{sessionId}' " +
+                                        $"({(this.firstClient ? "proxy-listener" : "proxy-client")}).");
+
+                                    // Enter the lock again. We don't need to check whether
+                                    // authenticatedSession is still null, as it can only be
+                                    // set to null by another connection handler, but not to
+                                    // an non-null value.
+                                    lock (this.server.SyncRoot)
                                     {
-                                        // Client authenticated successfully for the given
-                                        // session ID.
                                         this.authenticatedSession = session;
                                         this.firstClient = firstClient;
 
                                         int clientIdx = this.firstClient ? 0 : 1;
-
-                                        this.server.Logger?.Invoke(
-                                            $"Client '{this.clientEndpoint}' authenticated for Session ID '{sessionId}' " +
-                                            $"({(this.firstClient ? "proxy-listener" : "proxy-client")}).");
 
                                         // Check if an old client is present.
                                         // TODO: What should happen with that connection?
@@ -122,6 +169,7 @@ internal class ServerConnectionHandler
                                         // Inform this client and the other client about
                                         // the new status.
                                         this.SendSessionStatus();
+
                                         if (session.Clients[1 - clientIdx] is { } partnerClient)
                                         {
                                             partnerClient.SendSessionStatus();
@@ -136,47 +184,12 @@ internal class ServerConnectionHandler
                                         }
                                     }
                                 }
-
-                                if (this.authenticatedSession is null)
-                                {
-                                    var response = new byte[] { 0x01 };
-                                    this.endpoint.SendMessageByQueue(response);
-                                }
                             }
-                        }
-                    }
-                }
-                else
-                {
-                    if (packetBuffer.Length >= 1 && packetBuffer.Span[0] is 0x03)
-                    {
-                        // Acknowledge the current session iteration.
-                        lock (this.server.SyncRoot)
-                        {
-                            if (this.sessionIterationsToAcknowledge <= 0)
-                                throw new InvalidOperationException(); // Invalid message
 
-                            this.sessionIterationsToAcknowledge--;
-                        }
-                    }
-                    else if (packetBuffer.Length >= 1 &&
-                        packetBuffer.Span[0] is Constants.TypeClientToClientCommunication)
-                    {
-                        // Client-to-client communication.
-                        lock (this.server.SyncRoot)
-                        {
-                            int clientIdx = this.ClientIdx;
-
-                            // Forward the packet to the partner client, if available and if
-                            // the current client has acknowledged the current session iteration.
-                            if (this.authenticatedSession.Clients[1 - clientIdx] is not null &&
-                                this.sessionIterationsToAcknowledge is 0)
+                            if (!couldAuthenticate)
                             {
-                                // Need to copy the data because it will be queued (and the buffer
-                                // may be reused by the caller).
-                                var resultPacket = packetBuffer.ToArray();
-                                this.authenticatedSession.Clients[1 - clientIdx]!.endpoint.SendMessageByQueue(
-                                    resultPacket);
+                                var response = new byte[] { 0x01 };
+                                this.endpoint.SendMessageByQueue(response);
                             }
                         }
                     }

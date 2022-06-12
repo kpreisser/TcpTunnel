@@ -278,10 +278,10 @@ public class TcpTunnelClient
 
                 if (packetBuffer.Length >= 2 && packetBuffer.Span[0] is 0x02)
                 {
-                    bool remoteClientAvailable = packetBuffer.Span[1] is 0x01;
+                    bool partnerClientAvailable = packetBuffer.Span[1] is 0x01;
                     this.logger?.Invoke(
-                        $"Session Update: Remote Client Available: " +
-                        $"{(remoteClientAvailable ? "Yes" : "No")}.");
+                        $"Session Update: Partner Client Available: " +
+                        $"{(partnerClientAvailable ? "Yes" : "No")}.");
 
                     // New Session Status.
                     // We always first need to treat this as the partner client
@@ -289,7 +289,7 @@ public class TcpTunnelClient
                     // once when the partner client is replaced.
                     await this.HandlePartnerClientUnavailableAsync();
 
-                    if (remoteClientAvailable)
+                    if (partnerClientAvailable)
                         this.HandlePartnerClientAvailable(endpoint);
                 }
                 else if (packetBuffer.Length >= 1 + sizeof(long) &&
@@ -500,7 +500,7 @@ public class TcpTunnelClient
         {
             if (!this.remoteClientAvailable)
             {
-                // When the remote client is not available, immediately abort the accepted
+                // When the partner client is not available, immediately abort the accepted
                 // connection.
                 try
                 {
