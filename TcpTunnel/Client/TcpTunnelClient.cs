@@ -49,7 +49,7 @@ public class TcpTunnelClient
     private bool stopped;
 
     private bool remoteClientAvailable;
-    private FirstClientServer? currentServer;
+    private FirstClientListener? listener;
 
     /// <summary>
     /// The dictionary of active connections.
@@ -78,6 +78,19 @@ public class TcpTunnelClient
 
     public void Start()
     {
+        if (this.firstClientConnectionDescriptors is not null)
+        {
+            // First, start the listener to ensure we can actually listen on all specified ports.
+            this.listener = new FirstClientListener(
+                this.firstClientConnectionDescriptors,
+                (connectionId, client, portAndRemoteHost) => this.AcceptFirstClientServerClient(
+                    connectionId,
+                    client,
+                    portAndRemoteHost));
+
+            this.listener.Start();
+        }
+
         this.readTask = ExceptionUtils.StartTask(this.RunReadTaskAsync);
     }
 
@@ -85,6 +98,9 @@ public class TcpTunnelClient
     {
         if (this.readTask is null)
             throw new InvalidOperationException();
+
+        if (this.listener is not null)
+            this.listener.Stop();
 
         lock (this.syncRoot)
         {
@@ -113,7 +129,7 @@ public class TcpTunnelClient
             {
                 var client = new TcpClient();
 
-                bool wasConnected = false; 
+                bool wasConnected = false;
                 try
                 {
                     var tcpEndpoint = default(TcpClientFramingEndpoint);
@@ -295,21 +311,22 @@ public class TcpTunnelClient
 
                         var remoteClient = new TcpClient();
 
-                        var connection = this.AddTcpTunnelConnection(
-                            endpoint,
-                            connectionId,
-                            remoteClient,
-                            async cancellationToken =>
-                            {
-                                await remoteClient.ConnectAsync(hostname, port, cancellationToken);
+                        lock (this.syncRoot)
+                        {
+                            this.StartTcpTunnelConnection(
+                                endpoint,
+                                connectionId,
+                                remoteClient,
+                                async cancellationToken =>
+                                {
+                                    await remoteClient.ConnectAsync(hostname, port, cancellationToken);
 
-                                // After the socket is connected, configure it to disable the Nagle
-                                // algorithm and delayed ACKs (and maybe enable TCP keep-alive in the
-                                // future).
-                                SocketConfigurator.ConfigureSocket(remoteClient.Client);
-                            });
-
-                        connection.Start();
+                                    // After the socket is connected, configure it to disable the Nagle
+                                    // algorithm and delayed ACKs (and maybe enable TCP keep-alive in the
+                                    // future).
+                                    SocketConfigurator.ConfigureSocket(remoteClient.Client);
+                                });
+                        }
                     }
                     else
                     {
@@ -366,12 +383,15 @@ public class TcpTunnelClient
         }
     }
 
-    private TcpTunnelConnection AddTcpTunnelConnection(
+    private void StartTcpTunnelConnection(
         TcpClientFramingEndpoint endpoint,
         long connectionId,
         TcpClient remoteClient,
         Func<CancellationToken, ValueTask>? connectHandler = null)
     {
+        if (!Monitor.IsEntered(this.syncRoot))
+            throw new InvalidOperationException("A lock on syncRoot is required.");
+
         var connection = new TcpTunnelConnection(
             remoteClient,
             connectHandler,
@@ -424,40 +444,23 @@ public class TcpTunnelClient
                 }
             });
 
-        // Add the connection.
-        lock (this.syncRoot)
-        {
-            this.activeConnections.Add(connectionId, connection);
-        }
-
-        // Return it so that the caller can start it. We cannot start it here already,
-        // since the caller might first need to send a message to the partner client
-        // to inform it about the new connection, and it cannot do that before calling
-        // this method as otherwise the caller might already receive events for the
-        // connection before we actually added it to the list of active connections.
-        return connection;
+        // Add the connection and start it.
+        this.activeConnections.Add(connectionId, connection);
+        connection.Start();
     }
 
     private void HandlePartnerClientAvailable(TcpClientFramingEndpoint endpoint)
     {
-        this.remoteClientAvailable = true;
-
-        // Acknowledge the new session iteration. Sending this message must be done
-        // before starting the FirstClientServer.
-        var response = new byte[] { 0x03 };
-        endpoint.SendMessageByQueue(response);
-
-        if (this.firstClientConnectionDescriptors is not null)
+        lock (this.syncRoot)
         {
-            this.currentServer = new FirstClientServer(
-                this.firstClientConnectionDescriptors,
-                (connectionId, client, portAndRemoteHost) => this.AcceptFirstClientServerClient(
-                    endpoint,
-                    connectionId,
-                    client,
-                    portAndRemoteHost));
+            this.remoteClientAvailable = true;
 
-            this.currentServer.Start();
+            // Acknowledge the new session iteration. Sending this message must be
+            // done within the lock, as otherwise we might already start to send
+            // create connection messages (through the listener) which the tunnel server
+            // would then ignore.
+            var response = new byte[] { 0x03 };
+            endpoint.SendMessageByQueue(response);
         }
     }
 
@@ -465,22 +468,19 @@ public class TcpTunnelClient
     {
         if (this.remoteClientAvailable)
         {
-            this.remoteClientAvailable = false;
-
-            if (this.firstClientConnectionDescriptors is not null)
-            {
-                // Wait until the server no longer accepts new connections.
-                await this.currentServer!.StopAsync();
-                this.currentServer = null;
-            }
-
             // Close the connections.
             // We need to copy the list since we wait for the connections to exit,
             // and they might want to remove themselves from the list in the
             // meanwhile.
             var connectionsToWait = new List<TcpTunnelConnection>();
+
             lock (this.syncRoot)
             {
+                this.remoteClientAvailable = false;
+
+                // After we leave the lock, the listener won't add any more
+                // connections to the list until we call HandlePartnerClientAvailable
+                // again.
                 connectionsToWait.AddRange(this.activeConnections.Values);
             }
 
@@ -492,37 +492,55 @@ public class TcpTunnelClient
     }
 
     private void AcceptFirstClientServerClient(
-        TcpClientFramingEndpoint endpoint,
         long connectionId,
         TcpClient client,
         TcpTunnelConnectionDescriptor descriptor)
     {
-        // Create and add the connection to our list of active connections. We must start
-        // it only AFTER sending the initialization message, because the connection runs
-        // on another task and might already receive packets (which might then arrive
-        // on the partner client before the initialization message arrives).
-        var connection = this.AddTcpTunnelConnection(endpoint, connectionId, client);
+        lock (this.syncRoot)
+        {
+            if (!this.remoteClientAvailable)
+            {
+                // When the remote client is not available, immediately abort the accepted
+                // connection.
+                try
+                {
+                    client.Client.Close(0);
+                    client.Dispose();
+                }
+                catch (Exception ex) when (ex.CanCatch())
+                {
+                    // Ignore.
+                }
 
-        // Send the message not before we added the connection to our list of active
-        // connections. Otherwise, if we sent it earlier, it could happen that the
-        // partner client already sends events for the connection (like data packets),
-        // but we would discard them since we wouldn't yet find it in the list.
-        var hostnameBytes = Encoding.UTF8.GetBytes(descriptor.RemoteHost);
-        var response = new byte[1 + sizeof(long) + 1 + sizeof(int) + hostnameBytes.Length];
-        response[0] = Constants.TypeClientToClientCommunication;
+                return;
+            }
 
-        BinaryPrimitives.WriteInt64BigEndian(response.AsSpan()[1..], connectionId);
-        response[1 + sizeof(long)] = 0x00;
+            // Send the create connection message before we add the connection to our list
+            // of active connections and start it. Otherwise, if we sent it after that, it
+            // could happen that the partner client would receive message for the connection
+            // before it actually received the create connection message.
+            // Note that sending the message and adding+starting the connection needs to be
+            // done in the same lock, as otherwise it could happen that we would aleady receive
+            // messages for the connection but wouldn't find it in the list.
+            var hostnameBytes = Encoding.UTF8.GetBytes(descriptor.RemoteHost);
+            var response = new byte[1 + sizeof(long) + 1 + sizeof(int) + hostnameBytes.Length];
+            response[0] = Constants.TypeClientToClientCommunication;
 
-        BinaryPrimitives.WriteInt32BigEndian(
-            response.AsSpan()[(1 + sizeof(long) + 1)..],
-            descriptor.RemotePort);
+            BinaryPrimitives.WriteInt64BigEndian(response.AsSpan()[1..], connectionId);
+            response[1 + sizeof(long)] = 0x00;
 
-        hostnameBytes.CopyTo(response.AsSpan()[(1 + sizeof(long) + 1 + sizeof(int))..]);
+            BinaryPrimitives.WriteInt32BigEndian(
+                response.AsSpan()[(1 + sizeof(long) + 1)..],
+                descriptor.RemotePort);
 
-        endpoint.SendMessageByQueue(response);
+            hostnameBytes.CopyTo(response.AsSpan()[(1 + sizeof(long) + 1 + sizeof(int))..]);
 
-        // After sending the message, we can start the connection.
-        connection.Start();
+            // Send the message. From that point, our receiver task might already receive
+            // events for the connection, which then need to wait for the lock.
+            this.tcpEndpoint!.SendMessageByQueue(response);
+
+            // Add the connection to the list and start it.
+            this.StartTcpTunnelConnection(this.tcpEndpoint!, connectionId, client);
+        }
     }
 }

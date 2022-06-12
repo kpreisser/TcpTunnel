@@ -10,7 +10,7 @@ using TcpTunnel.Utils;
 
 namespace TcpTunnel.Client;
 
-internal class FirstClientServer
+internal class FirstClientListener
 {
     private readonly IReadOnlyList<TcpTunnelConnectionDescriptor> connectionDescriptors;
     private readonly Action<long, TcpClient, TcpTunnelConnectionDescriptor> clientAcceptor;
@@ -21,7 +21,7 @@ internal class FirstClientServer
     private long nextConnectionId;
     private bool stopped;
 
-    public FirstClientServer(
+    public FirstClientListener(
         IReadOnlyList<TcpTunnelConnectionDescriptor> connectionDescriptors,
         Action<long, TcpClient, TcpTunnelConnectionDescriptor> clientAcceptor)
     {
@@ -31,6 +31,8 @@ internal class FirstClientServer
 
     public void Start()
     {
+        Volatile.Write(ref this.stopped, false);
+
         // Create listeners.
         foreach (var descriptor in this.connectionDescriptors)
         {
@@ -46,9 +48,9 @@ internal class FirstClientServer
             }
             catch (Exception ex) when (ex.CanCatch())
             {
-                // Ignore.
-                // TODO: Log.
-                continue;
+                // Stop the previously started listeners, then rethrow the exception.
+                this.Stop();
+                throw;
             }
 
             var listenerTask = ExceptionUtils.StartTask(
@@ -58,15 +60,17 @@ internal class FirstClientServer
         }
     }
 
-    public async ValueTask StopAsync()
+    public void Stop()
     {
         Volatile.Write(ref this.stopped, true);
 
         foreach (var tuple in this.firstClientListeners)
         {
             tuple.listener.Stop();
-            await tuple.task;
+            tuple.task.GetAwaiter().GetResult();
         }
+
+        this.firstClientListeners.Clear();
     }
 
     private async Task RunListenerTask(

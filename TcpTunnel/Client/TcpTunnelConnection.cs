@@ -293,10 +293,18 @@ internal class TcpTunnelConnection
             // it could happen that Abort() is called after we already entered the
             // above 'finally' clause and waited for the transmit task to finish.
             bool ctsWasCanceled = this.cts.Token.IsCancellationRequested;
-            if (isAbort || ctsWasCanceled)
-                this.remoteClient.Client.Close(0);
 
-            this.remoteClient.Dispose();
+            try
+            {
+                if (isAbort || ctsWasCanceled)
+                    this.remoteClient.Client.Close(0);
+
+                this.remoteClient.Dispose();
+            }
+            catch (Exception ex) when (ex.CanCatch())
+            {
+                // Ignore
+            }
 
             // Dispose the CTS.
             lock (this.syncRoot)
