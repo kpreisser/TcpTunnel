@@ -53,8 +53,6 @@ public class TcpTunnelClient
 
     /// <summary>
     /// The dictionary of active connections.
-    /// This dictionary needs to be accesses with a lock, because it it may also be
-    /// accessed from the TcpTunnelConnection's receive tasks.
     /// </summary>
     private readonly Dictionary<long, TcpTunnelConnection> activeConnections = new();
 
