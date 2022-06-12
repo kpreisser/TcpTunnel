@@ -160,7 +160,8 @@ public class TcpTunnelClient
                             this.logger?.Invoke(
                                 $"Connection established to gateway " +
                                 $"'{this.hostname}:{this.port.ToString(CultureInfo.InvariantCulture)}'. " +
-                                $"Authenticating...");
+                                $"Authenticating for Session ID '{this.sessionId.ToString(CultureInfo.InvariantCulture)}' " +
+                                $"({(this.firstClientConnectionDescriptors is not null ? "proxy-listener" : "proxy-client")})...");
                         },
                         closeHandler: () =>
                         {
@@ -276,7 +277,7 @@ public class TcpTunnelClient
                 {
                     bool partnerClientAvailable = packetBuffer.Span[1] is 0x01;
                     this.logger?.Invoke(
-                        $"Session Update: Partner Client Available: " +
+                        $"Session Update: Partner Proxy Available: " +
                         $"{(partnerClientAvailable ? "Yes" : "No")}.");
 
                     // New Session Status.

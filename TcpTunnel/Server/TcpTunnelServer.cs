@@ -72,7 +72,7 @@ public class TcpTunnelServer
     public void Start()
     {
         this.logger?.Invoke(
-            $"Listener started on port '{this.port.ToString(CultureInfo.InvariantCulture)}'.");
+            $"Gateway listener started on port '{this.port.ToString(CultureInfo.InvariantCulture)}'.");
 
         this.listener.Start();
         this.listenerTask = ExceptionUtils.StartTask(this.RunListenerTask);
