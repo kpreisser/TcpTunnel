@@ -4,101 +4,107 @@ using System.Diagnostics;
 using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
-using TcpTunnel.SocketInterfaces;
+
+using SimpleSocketClient;
+
 using TcpTunnel.Utils;
 
-namespace TcpTunnel.Client
+namespace TcpTunnel.Client;
+
+internal class FirstClientServer
 {
-    internal class FirstClientServer
+    private readonly IReadOnlyList<TcpTunnelConnectionDescriptor> connectionDescriptors;
+    private readonly Action<long, TcpClient, TcpTunnelConnectionDescriptor> clientAcceptor;
+
+    private readonly List<(TcpListener listener, Task task)> firstClientListeners = new();
+    private readonly object syncRoot = new();
+
+    private long nextConnectionId;
+    private bool stopped;
+
+    public FirstClientServer(
+        IReadOnlyList<TcpTunnelConnectionDescriptor> connectionDescriptors,
+        Action<long, TcpClient, TcpTunnelConnectionDescriptor> clientAcceptor)
     {
-        private readonly IReadOnlyList<TcpTunnelConnectionDescriptor> connectionDescriptors;
-        private readonly TcpClientFramingEndpoint endpoint;
-        private readonly Action<long, TcpClient, TcpTunnelConnectionDescriptor> clientAcceptor;
+        this.connectionDescriptors = connectionDescriptors;
+        this.clientAcceptor = clientAcceptor;
+    }
 
-        private readonly object syncRoot = new object();
-        private List<Tuple<TcpListener, Task>> firstClientListeners = new List<Tuple<TcpListener, Task>>();
-        private long currentConnectionID = 0;
-        
-
-        private bool stopped;
-
-        public FirstClientServer(IReadOnlyList<TcpTunnelConnectionDescriptor> connectionDescriptors,
-            TcpClientFramingEndpoint endpoint,
-            Action<long, TcpClient, TcpTunnelConnectionDescriptor> clientAcceptor)
+    public void Start()
+    {
+        // Create listeners.
+        foreach (var descriptor in this.connectionDescriptors)
         {
-            this.connectionDescriptors = connectionDescriptors;
-            this.endpoint = endpoint;
-            this.clientAcceptor = clientAcceptor;
-        }
-
-        public void Start()
-        {
-            // Create listeners.
-            foreach (var descriptor in this.connectionDescriptors)
+            TcpListener listener;
+            try
             {
-                TcpListener listener;
-                try
-                {
-                    if (descriptor.ListenIP == null)
-                        listener = TcpListener.Create(descriptor.ListenPort);
-                    else
-                        listener = new TcpListener(descriptor.ListenIP, descriptor.ListenPort);
-                    listener.Start();
-                }
-                catch (Exception ex) when (ExceptionUtils.FilterException(ex))
-                {
-                    // Ignore.
-                    Debug.WriteLine(ex.ToString());
-                    continue;
-                }
+                if (descriptor.ListenIP is null)
+                    listener = TcpListener.Create(descriptor.ListenPort);
+                else
+                    listener = new TcpListener(descriptor.ListenIP, descriptor.ListenPort);
 
-                var listenerTask = Task.Run(async () => await ExceptionUtils.WrapTaskForHandlingUnhandledExceptions(
-                    async () => await RunListenerTask(listener, descriptor)));
-
-                this.firstClientListeners.Add(new Tuple<TcpListener, Task>(listener, listenerTask));
+                listener.Start();
             }
-        }
-
-        public void Stop()
-        {
-            Volatile.Write(ref stopped, true);
-            foreach (var tuple in this.firstClientListeners)
+            catch (Exception ex) when (ex.CanCatch())
             {
-                tuple.Item1.Stop();
-                tuple.Item2.Wait();
-                tuple.Item2.Dispose();
+                // Ignore.
+                Debug.WriteLine(ex.ToString());
+                continue;
             }
+
+            var listenerTask = ExceptionUtils.StartTask(
+                () => this.RunListenerTask(listener, descriptor));
+
+            this.firstClientListeners.Add((listener, listenerTask));
         }
+    }
 
-        private async Task RunListenerTask(TcpListener listener, TcpTunnelConnectionDescriptor portAndRemoteHost)
+    public async ValueTask StopAsync()
+    {
+        Volatile.Write(ref this.stopped, true);
+
+        foreach (var tuple in this.firstClientListeners)
         {
-            while (true)
+            tuple.listener.Stop();
+            await tuple.task;
+        }
+    }
+
+    private async Task RunListenerTask(
+        TcpListener listener,
+        TcpTunnelConnectionDescriptor connectionDescriptor)
+    {
+        while (true)
+        {
+            TcpClient client;
+            try
             {
-                TcpClient client;
-                try
-                {
-                    client = await listener.AcceptTcpClientAsync();
-                    client.NoDelay = Constants.TcpClientNoDelay;
-                }
-                catch (Exception ex) when (ExceptionUtils.FilterException(ex))
-                {
-                    // Can be a SocketException or an ObjectDisposedException.
-                    // Need to break out of the loop.
-                    // However, if stopped is not set to true, it is another error so rethrow it.
-                    if (!Volatile.Read(ref stopped))
-                        throw;
-
-                    return;
-                }
-
-                // Handle the client.
-                long newConnectionID;
-                lock (this.syncRoot)
-                {
-                    newConnectionID = checked(this.currentConnectionID++);
-                }
-                this.clientAcceptor(newConnectionID, client, portAndRemoteHost);
+                client = await listener.AcceptTcpClientAsync();
             }
+            catch (Exception ex) when (ex.CanCatch())
+            {
+                // Check if the error occured because we need to stop.
+                if (Volatile.Read(ref this.stopped))
+                    break;
+
+                // It is another error, so ignore it. This can sometimes happen when the
+                // client closed the connection directly after accepting it.
+                continue;
+            }
+
+            // After the socket is connected, configure it to disable the Nagle
+            // algorithm and delayed ACKs (and maybe enable TCP keep-alive in the
+            // future).
+            SocketConfigurator.ConfigureSocket(client.Client);
+
+            // Handle the client.
+            long newConnectionId;
+            lock (this.syncRoot)
+            {
+                newConnectionId = checked(this.nextConnectionId++);
+            }
+
+            this.clientAcceptor(newConnectionId, client, connectionDescriptor);
         }
     }
 }

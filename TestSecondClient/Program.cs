@@ -1,8 +1,6 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Linq;
 using System.Text;
-using System.Threading.Tasks;
+
 using TcpTunnel.Client;
 
 namespace TestSecondClient
@@ -11,13 +9,23 @@ namespace TestSecondClient
     {
         static void Main(string[] args)
         {
-            TcpTunnelClient firstClient = new TcpTunnelClient("localhost", 23654, false, 15, "testPasswort", null);
+            var firstClient = new TcpTunnelClient("localhost", 23654, false, 15, Encoding.UTF8.GetBytes("testPasswort"), null);
             firstClient.Start();
+
             Console.WriteLine($"Client started.");
             Console.ReadKey();
             Console.WriteLine("Stopping client...");
             firstClient.Stop();
             Console.WriteLine("Client stopped.");
+
+            //new System.Threading.Thread(() =>
+            //{
+            //    while (true)
+            //    {
+            //        System.Threading.Thread.Sleep(3000);
+            //        GC.Collect();
+            //    }
+            //}).Start();
         }
     }
 }

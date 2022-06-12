@@ -1,92 +1,81 @@
 ﻿using System;
-using System.Diagnostics;
+using System.Runtime.Versioning;
 using System.ServiceProcess;
-using System.Threading.Tasks;
 
-namespace TcpTunnel.ServiceSupport
+namespace TcpTunnel.ServiceSupport;
+
+[SupportedOSPlatform("windows")]
+internal class TcpTunnelService : ServiceBase
 {
-    internal class TcpTunnelService : ServiceBase
+    private readonly TcpTunnelRunner runner = new TcpTunnelRunner();
+
+    public TcpTunnelService()
     {
-        private TcpTunnelRunner runner = new TcpTunnelRunner();
+        this.InitializeComponent();
+    }
 
-        public TcpTunnelService()
-        {
-            InitializeComponent();
-        }
+    //private EventLog eventLog1;
 
+    public const string MyServiceName = "TcpTunnelService";
 
-        #region ServiceDetails
+    private void InitializeComponent()
+    {
+        //this.eventLog1 = new EventLog();
+        //((System.ComponentModel.ISupportInitialize)(this.eventLog1)).BeginInit();
 
+        // 
+        // Service1
+        // 
+        this.ServiceName = MyServiceName;
 
-        //private EventLog eventLog1;
+        //((System.ComponentModel.ISupportInitialize)(this.eventLog1)).EndInit();
 
-        public const string MyServiceName = "TcpTunnelService";
+        //string eventLogSource = MyServiceName;
 
+        //if (!EventLog.SourceExists(eventLogSource))
+        //{
+        //    EventLog.CreateEventSource(eventLogSource, string.Empty);
+        //}
 
-        private void InitializeComponent()
-        {
-            //this.eventLog1 = new EventLog();
-            //((System.ComponentModel.ISupportInitialize)(this.eventLog1)).BeginInit();
+        //eventLog1.Source = eventLogSource;
+        //eventLog1.Log = string.Empty;
+    }
 
-            // 
-            // Service1
-            // 
-            this.ServiceName = MyServiceName;
+    protected override void OnStart(string[] args)
+    {
+        this.runner.Start();
 
-            //((System.ComponentModel.ISupportInitialize)(this.eventLog1)).EndInit();
+        this.LogInfo("Service started.");
+    }
 
-            //string eventLogSource = MyServiceName;
+    protected override void OnStop()
+    {
+        this.runner.Stop();
 
-            //if (!EventLog.SourceExists(eventLogSource))
-            //{
-            //    EventLog.CreateEventSource(eventLogSource, string.Empty);
-            //}
+        this.LogInfo("Service stopped.");
+    }
 
-            //eventLog1.Source = eventLogSource;
-            //eventLog1.Log = string.Empty;
-        }
+    private void LogInfo(string text)
+    {
+        //eventLog1.WriteEntry(text, EventLogEntryType.Information);
+    }
 
+    private void LogWarning(string text)
+    {
+        //eventLog1.WriteEntry(text, EventLogEntryType.Warning);
+    }
 
-        #endregion
+    private void LogException(Exception ex)
+    {
+        //eventLog1.WriteEntry("Exception: " + ex.ToString(), EventLogEntryType.Error);
+    }
+    
+    internal static void RunService()
+    {
+        var servicesToRun = new[] {
+            new TcpTunnelService()
+        };
 
-
-        protected override void OnStart(string[] args)
-        {
-            runner.Start();
-
-            LogInfo("Service started.");
-        }
-
-        protected override void OnStop()
-        {
-            runner.Stop();
-
-            LogInfo("Service stopped.");
-        }
-
-
-
-        private void LogInfo(string text)
-        {
-            //eventLog1.WriteEntry(text, EventLogEntryType.Information);
-        }
-
-        private void LogWarning(string text)
-        {
-            //eventLog1.WriteEntry(text, EventLogEntryType.Warning);
-        }
-
-        private void LogException(Exception ex)
-        {
-            //eventLog1.WriteEntry("Exception: " + ex.ToString(), EventLogEntryType.Error);
-        }
-        
-        internal static void RunService()
-        {
-            ServiceBase[] servicesToRun = {
-                new TcpTunnelService()
-            };
-            ServiceBase.Run(servicesToRun);
-        }
+        ServiceBase.Run(servicesToRun);
     }
 }

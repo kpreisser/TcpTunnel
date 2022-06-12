@@ -1,11 +1,11 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Net;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
+
 using TcpTunnel.Client;
 using TcpTunnel.Server;
 using TcpTunnel.Utils;
@@ -14,82 +14,111 @@ namespace TcpTunnel
 {
     internal class TcpTunnelRunner
     {
-        private TcpTunnelServer server;
-        private TcpTunnelClient client;
+        private TcpTunnelServer? server;
+        private TcpTunnelClient? client;
 
         public void Start()
         {
             // Load the settings text file.
-            string settingsPath = Path.Combine(Path.GetDirectoryName(Process.GetCurrentProcess().MainModule.FileName), "settings.txt");
+            string settingsPath = Path.Combine(Path.GetDirectoryName(Environment.ProcessPath)!, "settings.txt");
             string settingsContent = File.ReadAllText(settingsPath, Encoding.UTF8).Replace("\r", "");
-            string[] settingsLines = settingsContent.Split(new string[] { "\n" }, StringSplitOptions.None);
+            string[] settingsLines = settingsContent.Split("\n", StringSplitOptions.None);
 
             // Remove "#"
             for (int i = 0; i < settingsLines.Length; i++)
             {
-                var commentIdx = settingsLines[i].IndexOf("#");
+                int commentIdx = settingsLines[i].IndexOf("#");
                 if (commentIdx >= 0)
-                    settingsLines[i] = settingsLines[i].Substring(0, commentIdx);
+                    settingsLines[i] = settingsLines[i][..commentIdx];
             }
 
-            if (settingsLines[0] == "server")
+            string applicationType = settingsLines[0].Trim();
+            bool isProxyListener = false;
+
+            if (string.Equals(applicationType, "gateway", StringComparison.OrdinalIgnoreCase))
             {
                 // Line 2: Port, Line 3: Certificate Thumbprint (if not empty), Lines 4...: SessionID + "," + SessionPasswort
-                int port = int.Parse(settingsLines[1], CultureInfo.InvariantCulture);
-                string certificateThumbprint = settingsLines[2];
-                X509Certificate2 certificate = null;
+                int port = int.Parse(settingsLines[1].Trim(), CultureInfo.InvariantCulture);
+                string certificateThumbprint = settingsLines[2].Trim();
+                var certificate = default(X509Certificate2);
+
                 if (certificateThumbprint.Length > 0)
                 {
-                    certificate = CertificateUtils.GetCurrentUserOrLocalMachineCertificateFromFingerprint(certificateThumbprint);
-                    if (certificate == null)
-                        throw new Exception($"Could not find certificate with thumbprint '{certificateThumbprint}'.");
+                    certificate = CertificateUtils.GetCurrentUserOrLocalMachineCertificateFromFingerprint(
+                        certificateThumbprint);
                 }
 
-                IDictionary<int, string> sessions = new SortedDictionary<int, string>();
-                for (int i  = 3; i < settingsLines.Length; i++)
+                var sessions = new Dictionary<int, string>();
+                for (int i = 3; i < settingsLines.Length; i++)
                 {
                     string line = settingsLines[i];
+
                     int commaIndex = line.IndexOf(",");
                     if (commaIndex > 0)
                     {
-                        int sessionID = int.Parse(line.Substring(0, commaIndex), CultureInfo.InvariantCulture);
-                        string sessionPassword = line.Substring(commaIndex + 1);
-                        sessions.Add(sessionID, sessionPassword);
+                        int sessionId = int.Parse(line[..commaIndex], CultureInfo.InvariantCulture);
+                        string sessionPassword = line[(commaIndex + 1)..];
+                        sessions.Add(sessionId, sessionPassword);
                     }
                 }
 
                 this.server = new TcpTunnelServer(port, certificate, sessions);
                 this.server.Start();
             }
-            else if (settingsLines[0] == "client")
+            else if (string.Equals(applicationType, "proxyclient", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(applicationType, "proxylistener", StringComparison.OrdinalIgnoreCase) &&
+                    (isProxyListener = true))
             {
                 // Hostname, Port, Usessl, SessionID, SessionPasswort, Line 7....: Port + "," + Hostname
-                string hostname = settingsLines[1];
-                int port = int.Parse(settingsLines[2], CultureInfo.InvariantCulture);
-                bool usessl = settingsLines[3] == "1" || settingsLines[3].ToLowerInvariant() == "true";
-                int sessionID = int.Parse(settingsLines[4], CultureInfo.InvariantCulture);
+                string hostname = settingsLines[1].Trim();
+                int port = int.Parse(settingsLines[2].Trim(), CultureInfo.InvariantCulture);
+                bool useSsl = settingsLines[3] is string line3 && (line3 is "1" || string.Equals(
+                    line3,
+                    "true",
+                    StringComparison.OrdinalIgnoreCase));
+
+                int sessionId = int.Parse(settingsLines[4].Trim(), CultureInfo.InvariantCulture);
                 string sessionPassword = settingsLines[5];
-                List<TcpTunnelConnectionDescriptor> descriptors = new List<TcpTunnelConnectionDescriptor>();
-                for (int i = 6; i < settingsLines.Length; i++)
+
+                var descriptors = default(List<TcpTunnelConnectionDescriptor>);
+
+                if (isProxyListener)
                 {
-                    string line = settingsLines[i];
-                    string[] lineEntries = line.Split(new string[] { "," }, StringSplitOptions.None);
-                    IPAddress listenIP = lineEntries[0].Length == 0 ? null : IPAddress.Parse(lineEntries[0]);    
-                    int listenPort = int.Parse(lineEntries[1], CultureInfo.InvariantCulture);
-                    string remoteHost = lineEntries[2];
-                    int remotePort = int.Parse(lineEntries[3], CultureInfo.InvariantCulture);
-                    descriptors.Add(new Client.TcpTunnelConnectionDescriptor(listenIP, listenPort, remoteHost, remotePort));
-                    
+                    descriptors = new List<TcpTunnelConnectionDescriptor>();
+
+                    for (int i = 6; i < settingsLines.Length; i++)
+                    {
+                        string line = settingsLines[i].Trim();
+                        var lineEntries = line.Split(new string[] { "," }, StringSplitOptions.None);
+
+                        var listenIP = lineEntries[0].Length is 0 ? null : IPAddress.Parse(lineEntries[0]);
+                        int listenPort = int.Parse(lineEntries[1], CultureInfo.InvariantCulture);
+                        string remoteHost = lineEntries[2];
+                        int remotePort = int.Parse(lineEntries[3], CultureInfo.InvariantCulture);
+
+                        descriptors.Add(new TcpTunnelConnectionDescriptor(
+                            listenIP,
+                            listenPort,
+                            remoteHost,
+                            remotePort));
+
+                    }
                 }
 
-                this.client = new TcpTunnelClient(hostname, port, usessl, sessionID, sessionPassword, descriptors.Count == 0 ? null : descriptors);
+                this.client = new TcpTunnelClient(
+                    hostname,
+                    port,
+                    useSsl,
+                    sessionId,
+                    Encoding.UTF8.GetBytes(sessionPassword),
+                    descriptors);
+
                 this.client.Start();
             }
             else
             {
-                throw new InvalidDataException();
+                throw new ArgumentException("Unknown application type.");
             }
-
         }
 
         public void Stop()

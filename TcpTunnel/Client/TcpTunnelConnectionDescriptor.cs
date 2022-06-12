@@ -1,24 +1,39 @@
 ﻿using System;
 using System.Net;
 
-namespace TcpTunnel.Client
+namespace TcpTunnel.Client;
+
+public class TcpTunnelConnectionDescriptor
 {
-    public class TcpTunnelConnectionDescriptor
+    public TcpTunnelConnectionDescriptor(
+        IPAddress? listenIP,
+        int listenPort,
+        string remoteHost,
+        int remotePort)
     {
-        public IPAddress ListenIP { get; } // can be null
-        public int ListenPort { get; }
-        public string RemoteHost { get; }
-        public int RemotePort { get; }
+        this.ListenIP = listenIP;
+        this.ListenPort = listenPort;
+        this.RemoteHost = remoteHost ?? throw new ArgumentNullException(nameof(remoteHost));
+        this.RemotePort = remotePort;
+    }
 
-        public TcpTunnelConnectionDescriptor(IPAddress listenIP, int listenPort, string remoteHost, int remotePort)
-        {
-            if (remoteHost == null)
-                throw new ArgumentNullException(nameof(remoteHost));
+    public IPAddress? ListenIP
+    {
+        get;
+    } 
 
-            this.ListenIP = listenIP;
-            this.ListenPort = listenPort;
-            this.RemoteHost = remoteHost;
-            this.RemotePort = remotePort;
-        }
+    public int ListenPort
+    {
+        get;
+    }
+
+    public string RemoteHost
+    {
+        get;
+    }
+
+    public int RemotePort
+    {
+        get;
     }
 }

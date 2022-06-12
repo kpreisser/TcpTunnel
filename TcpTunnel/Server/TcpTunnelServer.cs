@@ -1,188 +1,232 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
-using System.Linq;
 using System.Net.Security;
 using System.Net.Sockets;
-using System.Security.Authentication;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using TcpTunnel.SocketInterfaces;
+
+using SimpleSocketClient;
+
+using TcpTunnel.Networking;
 using TcpTunnel.Utils;
 
-namespace TcpTunnel.Server
+namespace TcpTunnel.Server;
+
+public class TcpTunnelServer
 {
-    public class TcpTunnelServer
+    public const int MaxReceivePacketSize = 2 * 1024 * 1024;
+    public const int MaxSendBufferSize = 5 * 1024 * 1024;
+
+    private readonly X509Certificate2? certificate;
+
+    private readonly TcpListener listener;
+    private readonly Dictionary<ServerConnectionHandler, (Task task, bool canCancelEndpoint)> activeHandlers = new();
+
+    private Task? listenerTask;
+    private bool stopped;
+
+    public TcpTunnelServer(int port, X509Certificate2? certificate, IDictionary<int, string> sessions)
     {
-        public const int MaxReceivePacketSize = 2 * 1024 * 1024;
-        public const int MaxSendBufferSize = 5 * 1024 * 1024;
+        this.certificate = certificate;
+        this.Sessions = new SortedDictionary<int, Session>();
 
-        private readonly int port;
-        private readonly X509Certificate2 certificate;
-        
-        private TcpListener listener;
-        private Task listenerTask;
-        private List<SocketHandlerWrapper> activeHandlers = new List<SocketHandlerWrapper>();
-        private bool stopped = false;
+        foreach (var pair in sessions)
+            this.Sessions.Add(pair.Key, new Session(Encoding.UTF8.GetBytes(pair.Value)));
 
-        internal SortedDictionary<int, Session> sessions { get; } =
-            new SortedDictionary<int, Session>();
+        this.listener = TcpListener.Create(port);
+    }
 
-        internal object SyncRoot { get; } = new object();
+    internal SortedDictionary<int, Session> Sessions
+    {
+        get;
+    } = new();
 
+    internal object SyncRoot
+    {
+        get;
+    } = new();
 
-        public TcpTunnelServer(int port, X509Certificate2 certificate, IDictionary<int, string> sessions)
+    public void Start()
+    {
+        this.listener.Start();
+        this.listenerTask = ExceptionUtils.StartTask(this.RunListenerTask);
+    }
+
+    public void Stop()
+    {
+        Volatile.Write(ref this.stopped, true);
+        this.listener.Stop();
+
+        // Wait for the listener task.
+        this.listenerTask!.Wait();
+        this.listenerTask.Dispose();
+    }
+
+    private async Task RunListenerTask()
+    {
+        bool isStopped = false;
+
+        try
         {
-            this.port = port;
-            this.certificate = certificate;
-            this.sessions = new SortedDictionary<int, Session>();
-            foreach (var pair in sessions)
-                this.sessions.Add(pair.Key, new Session(pair.Value));
-
-            this.listener = TcpListener.Create(port);
-        }
-
-
-        public void Start()
-        {
-            this.listener.Start();
-            this.listenerTask = Task.Run(async () =>
-                await ExceptionUtils.WrapTaskForHandlingUnhandledExceptions(RunListenerTask));
-        }
-        
-        public void Stop()
-        {
-            Volatile.Write(ref this.stopped, true);
-            this.listener.Stop();
-
-            // Wait for the listener task.
-            this.listenerTask.Wait();
-            this.listenerTask.Dispose();
-        }
-
-
-        private async Task RunListenerTask()
-        {
-            try
+            while (true)
             {
-                while (true)
+                TcpClient client;
+                try
                 {
-                    TcpClient client;
-                    try
-                    {
-                        client = await this.listener.AcceptTcpClientAsync();
-                    }
-                    catch (Exception ex) when (ExceptionUtils.FilterException(ex))
-                    {
-                        // Check if the error occured because we need to stop.
-                        if (Volatile.Read(ref this.stopped))
-                            break;
-
-                        // It is another error, so ignore it. This can sometimes happen when the
-                        // client closed the connection directly after accepting it.
-                        continue;
-                    }
-
-                    client.NoDelay = Constants.TcpClientNoDelay;
-
-                    var endpoint = new TcpClientFramingEndpoint(client, true, true, ModifyStreamAsync);
-                    var handler = new ConnectionHandler(this, endpoint);
-                    // Creating the wrapper and adding it to the dictionary needs to be
-                    // done before actually starting the task to avoid a race.
-                    var wrp = new SocketHandlerWrapper()
-                    {
-                         client = endpoint
-                    };
-                    lock (this.activeHandlers)
-                    {
-                        this.activeHandlers.Add(wrp);
-                    }
-
-                    // Start a task to handle the endpoint.
-                    var runTask = Task.Run(async () =>
-                        await ExceptionUtils.WrapTaskForHandlingUnhandledExceptions(async () =>
-                        {
-                            try
-                            {                                
-                                await endpoint.RunEndpointAsync(async () =>
-                                {
-                                    await endpoint.InitializeAsync();
-                                    await handler.RunAsync();
-                                });
-                            }
-                            catch (Exception ex) when (ExceptionUtils.FilterException(ex))
-                            {
-                                // Ignore.
-                                System.Diagnostics.Debug.WriteLine(ex.GetType() + ": " + ex.Message);
-                            }
-                            finally
-                            {
-                                lock (this.activeHandlers)
-                                {
-                                    // Remove the handler.
-                                    this.activeHandlers.Remove(wrp);
-                                }
-                            }
-                        }));
-                    wrp.handlerTask = runTask;
+                    client = await this.listener.AcceptTcpClientAsync();
                 }
-            }
-            finally
-            {
-                // Stop all active clients.
-                // Need to add the tasks in a separate list, because we cannot wait for them while we
-                // hold the lock for activeHandlers, otherwise a deadlock might occur because the handlers
-                // also remove themselves from that dictionary.
-                var tasksToWaitFor = new List<Task>();
+                catch (Exception ex) when (ex.CanCatch())
+                {
+                    // Check if the error occured because we need to stop.
+                    if (Volatile.Read(ref this.stopped))
+                        break;
+
+                    // It is another error, so ignore it. This can sometimes happen when the
+                    // client closed the connection directly after accepting it.
+                    continue;
+                }
+
+                // After the socket is connected, configure it to disable the Nagle
+                // algorithm and delayed ACKs (and maybe enable TCP keep-alive in the
+                // future).
+                SocketConfigurator.ConfigureSocket(client.Client);
+
+                var handler = default(ServerConnectionHandler);
+                var endpoint = new TcpClientFramingEndpoint(
+                    client,
+                    useSendQueue: true,
+                    usePingTimer: true,
+                    connectHandler: cancellationToken =>
+                    {
+                        // Beginning from this stage, the endpoint can be
+                        // canceled.
+                        lock (this.activeHandlers)
+                        {
+                            if (isStopped)
+                                throw new OperationCanceledException();
+
+                            CollectionsMarshal.GetValueRefOrNullRef(this.activeHandlers, handler!)
+                                .canCancelEndpoint = true;
+                        }
+
+                        return default;
+                    },
+                    closeHandler: () =>
+                    {
+                        // Once this handler returns, the endpoint may no longer
+                        // be canceled.
+                        lock (this.activeHandlers)
+                        {
+                            CollectionsMarshal.GetValueRefOrNullRef(this.activeHandlers, handler!)
+                                .canCancelEndpoint = false;
+                        }
+                    },
+                    streamModifier: this.ModifyStreamAsync);
+
+                handler = new ServerConnectionHandler(this, endpoint);
+
                 lock (this.activeHandlers)
                 {
-                    foreach (var cl in this.activeHandlers)
+                    // Start a task to handle the endpoint.
+                    var runTask = ExceptionUtils.StartTask(async () =>
                     {
-                        cl.client.Abort();
-                        tasksToWaitFor.Add(cl.handlerTask);
-                    }
-                }
+                        try
+                        {
+                            await endpoint.RunEndpointAsync(handler.RunAsync);
+                        }
+                        catch (Exception ex) when (ex.CanCatch())
+                        {
+                            // Ignore.
+                            Debug.WriteLine(ex.ToString());
+                        }
+                        finally
+                        {
+                            client.Dispose();
 
-                // After releasing the lock, wait for the tasks.
-                // Note: This is not quite clean because as the tasks remove themselves from the dictionary,
-                // a task might still be active although it is not in the dictionary any more.
-                // However this is OK because the task doesn't do anything after that point.
-                foreach (var t in tasksToWaitFor)
+                            lock (this.activeHandlers)
+                            {
+                                // Remove the handler.
+                                this.activeHandlers.Remove(handler);
+                            }
+                        }
+                    });
+
+                    this.activeHandlers.Add(handler, (runTask, false));
+                }
+            }
+        }
+        finally
+        {
+            // Stop all active clients.
+            // Need to add the tasks in a separate list, because we cannot wait for them
+            // while we hold the lock for activeHandlers, otherwise a deadlock might occur
+            // because the handlers also remove themselves from that dictionary.
+            var tasksToWaitFor = new List<Task>();
+            lock (this.activeHandlers)
+            {
+                isStopped = true;
+
+                foreach (var cl in this.activeHandlers)
                 {
-                    t.Wait();
-                    t.Dispose();
+                    if (cl.Value.canCancelEndpoint)
+                        cl.Key.Endpoint.Cancel();
+
+                    tasksToWaitFor.Add(cl.Value.task);
                 }
             }
-        }
 
-        private async Task<Tuple<TcpClient, Stream>> ModifyStreamAsync(NetworkStream s)
-        {
-            if (this.certificate == null)
+            // After releasing the lock, wait for the tasks.
+            // Note: The tasks remove themselves from the dictionary, so a task might still
+            // be executing  although it is not in the dictionary any more.
+            // However this is OK because the task doesn't do anything after that point.
+            foreach (var t in tasksToWaitFor)
             {
-                return new Tuple<TcpClient, Stream>(null, null);
-            }
-            else
-            {
-                var ssl = new SslStream(s);
-                await ssl.AuthenticateAsServerAsync(this.certificate, false, Constants.sslProtocols, false);
-                return new Tuple<TcpClient, Stream>(null, ssl);
+                await t;
             }
         }
+    }
 
-        public void Dispose()
+    private async ValueTask<Stream?> ModifyStreamAsync(
+        NetworkStream networkStream,
+        CancellationToken cancellationToken)
+    {
+        if (this.certificate is null)
         {
-            Stop();
+            return null;
         }
-
-
-
-        private class SocketHandlerWrapper
+        else
         {
-            public TcpClientEndpoint client;
-            public Task handlerTask;
+            var sslStream = new SslStream(networkStream);
+            try
+            {
+                await sslStream.AuthenticateAsServerAsync(
+                    new SslServerAuthenticationOptions()
+                    {
+                        // AllowRenegotiation is still true by default up to .NET 6.0.
+                        AllowRenegotiation = false,
+                        ServerCertificate = this.certificate,
+                        EnabledSslProtocols = Constants.sslProtocols
+                    },
+                    cancellationToken);
+            }
+            catch
+            {
+                await sslStream.DisposeAsync();
+                throw;
+            }
+
+            return sslStream;
         }
+    }
+
+    public void Dispose()
+    {
+        this.Stop();
     }
 }
 

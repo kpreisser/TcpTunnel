@@ -1,416 +1,507 @@
 ﻿using System;
+using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
-using System.Net;
 using System.Net.Security;
 using System.Net.Sockets;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using TcpTunnel.SocketInterfaces;
+
+using SimpleSocketClient;
+
+using TcpTunnel.Networking;
 using TcpTunnel.Utils;
 
-namespace TcpTunnel.Client
+namespace TcpTunnel.Client;
+
+/**
+ * CLIENT-TO-CLIENT COMMUNICATION:
+ * 8 bytes ConnectionID + 0x00 + 4 bytes port + utf-8 string Host: Open a new connection.
+ * 8 bytes ConnectionID + 0x01 + arbitrary bytes: Transmit data packet or shutdown the connection if arbitrary bytes's length is 0.
+ * 8 bytes ConnectionID + 0x02: Abort the connection.
+ * 8 bytes ConnectionID + 0x03 + 4 bytes window size: Update receive window.
+ */
+public class TcpTunnelClient
 {
-    /**
-     * Client to Client communication:
-     * 8 bytes ConnectionID + 0x00 + 4 bytes port + utf-8 string Host: Open a new connection.
-     * 8 bytes ConnectionID + 0x01 + arbitrary bytes: Transmit data packet or shutdown the connection if arbitrary bytes's length is 0.
-     * 8 bytes ConnectionID + 0x02 + 4 bytes window size: Update receive window.
-     */
-    public class TcpTunnelClient
+    public const int MaxReceivePacketSize = 2 * 1024 * 1024;
+
+    private readonly object syncRoot = new();
+
+    private readonly string hostname;
+    private readonly int port;
+    private readonly bool useSsl;
+    private readonly int sessionId;
+    private readonly ReadOnlyMemory<byte> sessionPasswordBytes;
+
+    /// <summary>
+    /// The first client is the one that provides server functionality by listening
+    /// on specific ports.
+    /// </summary>
+    private readonly IReadOnlyList<TcpTunnelConnectionDescriptor>? firstClientConnectionDescriptors;
+
+    private Task? readTask;
+    private TcpClientFramingEndpoint? tcpEndpoint;
+    private bool stopped;
+
+    private bool remoteClientAvailable;
+    private FirstClientServer? currentServer;
+
+    /// <summary>
+    /// The dictionary of active connections.
+    /// This dictionary needs to be accesses with a lock, because it it may also be
+    /// accessed from the TcpTunnelConnection's receive tasks.
+    /// </summary>
+    private readonly Dictionary<long, TcpTunnelConnection> activeConnections = new();
+
+    public TcpTunnelClient(
+        string hostname,
+        int port,
+        bool useSsl,
+        int sessionId,
+        ReadOnlyMemory<byte> sessionPasswordBytes,
+        IReadOnlyList<TcpTunnelConnectionDescriptor>? firstClientConnectionDescriptors)
     {
-        public const int MaxReceivePacketSize = 2 * 1024 * 1024;
-        public const int MaxSendBufferSize = 5 * 1024 * 1024;
+        this.hostname = hostname;
+        this.port = port;
+        this.useSsl = useSsl;
+        this.sessionId = sessionId;
+        this.sessionPasswordBytes = sessionPasswordBytes;
+        this.firstClientConnectionDescriptors = firstClientConnectionDescriptors;
+    }
 
-        private readonly string hostname;
-        private readonly int port;
-        private readonly bool useSsl;
-        private readonly int sessionID;
-        private readonly string sessionPassword;
-        /// <summary>
-        /// The first client is the one that provides server functionality by listening on specific ports.
-        /// </summary>
-        private readonly IReadOnlyList<TcpTunnelConnectionDescriptor> firstClientConnectionDescriptors;
+    public void Start()
+    {
+        this.readTask = ExceptionUtils.StartTask(this.RunReadTaskAsync);
+    }
 
-        private Task readTask;
-        private TcpClient tcpClient;
-        private bool stopped;
+    public void Stop()
+    {
+        if (this.readTask is null)
+            throw new InvalidOperationException();
 
-        public object SyncRoot { get; } = new object();
-        
-        private bool remoteClientAvailable;
-        private long currentIteration;
-        private FirstClientServer currentServer;
-        /// <summary>
-        /// The dictionary of active connections. A connection is only removed if we manually abort them, or it the
-        /// connection's receive handler is called with an null array.
-        /// This list needs to be accesses with a lock, because it it may also be accessed from the TcpTunnelConnection's
-        /// receive tasks.
-        /// </summary>
-        private IDictionary<long, TcpTunnelConnection> activeConnections =
-            new SortedDictionary<long, TcpTunnelConnection>();
-
-        public TcpTunnelClient(string hostname, int port, bool useSsl, int sessionID, string sessionPassword,
-            IReadOnlyList<TcpTunnelConnectionDescriptor> firstClientConnectionDescriptors)
+        lock (this.syncRoot)
         {
-            this.hostname = hostname;
-            this.port = port;
-            this.useSsl = useSsl;
-            this.sessionID = sessionID;
-            this.sessionPassword = sessionPassword;
-            this.firstClientConnectionDescriptors = firstClientConnectionDescriptors;
+            this.stopped = true;
+
+            if (this.tcpEndpoint is not null)
+                this.tcpEndpoint.Cancel();
         }
 
-        public void Start()
+        this.readTask.Wait();
+    }
+
+    private async Task RunReadTaskAsync()
+    {
+        while (true)
         {
-            this.readTask = Task.Run(async () => await ExceptionUtils.WrapTaskForHandlingUnhandledExceptions(RunReadTaskAsync));
-        }
-
-        public void Stop()
-        {
-            lock (this.SyncRoot)
+            lock (this.syncRoot)
             {
-                stopped = true;
-                if (this.tcpClient != null)
-                {
-                    lock (this.tcpClient) {
-                        this.tcpClient.Client?.Close(0);
-                        this.tcpClient.Close();   
-                    }
-                }
-            }
-
-            this.readTask.Wait();
-        }
-
-        private async Task RunReadTaskAsync()
-        {
-            // Try to connect using IPv6. If that fails, connect using IPv4.
-            while (true)
-            {
-                try
-                {
-                    for (int i = 0; i < 2; i++)
-                    {
-                        bool useIpv6 = i == 0;
-                        var client = new TcpClient(useIpv6 ? AddressFamily.InterNetworkV6 : AddressFamily.InterNetwork)
-                        {
-                            NoDelay = Constants.TcpClientNoDelay
-                        };
-
-                        lock (this.SyncRoot)
-                        {
-                            if (this.stopped)
-                                return;
-                            this.tcpClient = client;
-                        }
-
-                        try
-                        {
-                            await this.tcpClient.ConnectAsync(hostname, port);
-                            break;
-                        }
-                        catch (Exception ex) when (ExceptionUtils.FilterException(ex))
-                        {
-                            Debug.WriteLine(ex.ToString());
-                            lock (this.tcpClient)
-                                this.tcpClient.Dispose();
-                            if (i == 1)
-                                throw;
-                        }
-                    }
-
-                    var endpoint = new TcpClientFramingEndpoint(this.tcpClient, true, false, ModifyStreamAsync);
-                    await endpoint.InitializeAsync();
-                    await endpoint.RunEndpointAsync(async () => await RunEndpointAsync(endpoint));
-                }
-                catch (Exception ex) when (ExceptionUtils.FilterException(ex))
-                {
-                    // Ingore, and try again.
-                    Debug.WriteLine(ex.ToString());
-                }
-
-                // Wait. TODO: Use a semaphore to exit faster.
-                await Task.Delay(3000);
-            }
-        }
-
-        private async Task<Tuple<TcpClient, Stream>> ModifyStreamAsync(NetworkStream ns)
-        {
-            if (this.useSsl)
-            {
-                var ssl = new SslStream(ns);
-                await ssl.AuthenticateAsClientAsync(this.hostname, new X509CertificateCollection(),
-                    Constants.sslProtocols, false);
-                return new Tuple<TcpClient, Stream>(null, ssl);
-            }
-            else
-            {
-                return new Tuple<TcpClient, Stream>(null, null);
-            }
-        }
-
-        private async Task RunPingTaskAsync(SemaphoreSlim pingTimerSemaphore, TcpClientFramingEndpoint endpoint)
-        {
-            while (true)
-            {
-                bool exit = await pingTimerSemaphore.WaitAsync(60000);
-                if (exit)
+                if (this.stopped)
                     return;
-
-                endpoint.SendMessageByQueue(new byte[] { 0xFF });
             }
-        }
 
-        private async Task RunEndpointAsync(TcpClientFramingEndpoint endpoint)
-        {
-            using (var pingTimerSemaphore = new SemaphoreSlim(0))
+            try
             {
-                Task pingTimerTask = null;
+                var client = new TcpClient();
+
                 try
                 {
-                    // Send the login string.
-                    byte[] sessionPasswordBytes = Encoding.UTF8.GetBytes(this.sessionPassword);
-                    byte[] loginString = new byte[3 + Constants.loginPrerequisiteBytes.Count 
-                        + sizeof(int) + sessionPasswordBytes.Length];
-                    loginString[0] = 0x00;
-                    loginString[1] = 0x00;
-                    loginString[2] = firstClientConnectionDescriptors != null ? (byte)0x00 : (byte)0x01;
-                    Array.Copy(Constants.loginPrerequisiteBytes.Array, Constants.loginPrerequisiteBytes.Offset,
-                        loginString, 3, Constants.loginPrerequisiteBytes.Count);
-                    BitConverterUtils.ToBytes(IPAddress.HostToNetworkOrder(this.sessionID),
-                        loginString, 3 + Constants.loginPrerequisiteBytes.Count);
-                    Array.Copy(sessionPasswordBytes, 0, loginString,
-                        3 + Constants.loginPrerequisiteBytes.Count + sizeof(int), sessionPasswordBytes.Length);
-                    endpoint.SendMessageByQueue(loginString);
+                    var tcpEndpoint = default(TcpClientFramingEndpoint);
 
-                    // Start the ping timer task, then receive packets.
-                    pingTimerTask = Task.Run(async () => await RunPingTaskAsync(pingTimerSemaphore, endpoint));
-                                    
-                    while (true)
-                    {
-                        var packet = await endpoint.ReceiveNextPacketAsync(MaxReceivePacketSize);
-                        if (packet == null)
-                            return;
-
-                        if (packet.RawBytes.Count >= 2 + 8 + 1
-                            && packet.RawBytes.Array[packet.RawBytes.Offset + 0] == 0x00
-                            && packet.RawBytes.Array[packet.RawBytes.Offset + 1] == 0x02)
+                    tcpEndpoint = new TcpClientFramingEndpoint(
+                        client,
+                        useSendQueue: true,
+                        usePingTimer: false,
+                        connectHandler: async cancellationToken =>
                         {
-                            // Session Status
-                            HandleRemoteClientUnavailable();
+                            // Beginning from this stage, the endpoint can be canceled, so we
+                            // can now set it.
+                            lock (this.syncRoot)
+                            {
+                                if (this.stopped)
+                                    throw new OperationCanceledException();
 
-                            long currentSessionIteration = IPAddress.NetworkToHostOrder(BitConverter.ToInt64(
-                                packet.RawBytes.Array, packet.RawBytes.Offset + 2));
-                            this.currentIteration = currentSessionIteration;
-                            bool removeClientAvailable = packet.RawBytes.Array[packet.RawBytes.Offset + 2 + sizeof(long)] == 0x00;
+                                this.tcpEndpoint = tcpEndpoint!;
+                            }
 
-                            if (removeClientAvailable)
-                                HandleRemoteClientAvailable(endpoint, currentSessionIteration);
-                        }
-                        else if (packet.RawBytes.Count >= 1 + sizeof(long)
-                            && packet.RawBytes.Array[packet.RawBytes.Offset + 0] == 0x01)
+                            await client.ConnectAsync(this.hostname, this.port, cancellationToken);
+
+                            // After the socket is connected, configure it to disable the Nagle
+                            // algorithm and delayed ACKs (and maybe enable TCP keep-alive in the
+                            // future).
+                            SocketConfigurator.ConfigureSocket(client.Client);
+                        },
+                        closeHandler: () =>
                         {
-                            // Client to client communication.
-                            long connectionID = IPAddress.NetworkToHostOrder(BitConverter.ToInt64(packet.RawBytes.Array,
-                                packet.RawBytes.Offset + 1));
-
-                            if (packet.RawBytes.Count >= 1 + sizeof(long) + 1 + sizeof(int) 
-                                && packet.RawBytes.Array[packet.RawBytes.Offset + 1 + sizeof(long)] == 0x00
-                                && firstClientConnectionDescriptors == null)
+                            // Once this handler returns, the endpoint may no longer
+                            // be canceled, so clear the instance.
+                            lock (this.syncRoot)
                             {
-                                // Open a new connection, if we are not the first client.
-                                int port = IPAddress.NetworkToHostOrder(BitConverter.ToInt32(
-                                    packet.RawBytes.Array, packet.RawBytes.Offset + 1 + sizeof(long) + 1));
-                                string hostname = Encoding.UTF8.GetString(packet.RawBytes.Array,
-                                    packet.RawBytes.Offset + 1 + sizeof(long) + 1 + sizeof(int),
-                                    packet.RawBytes.Count - (1 + sizeof(long) + 1 + sizeof(int)));
-
-                                // TODO: Add support for IPv6
-                                var remoteClient = new TcpClient()
-                                {
-                                    NoDelay = Constants.TcpClientNoDelay
-                                };
-                                var connection = CreateTcpTunnelConnection(endpoint, this.currentIteration, connectionID,
-                                    remoteClient, async () => await remoteClient.ConnectAsync(hostname, port));
-                                // Add the connection.
-                                lock (this.SyncRoot)
-                                {
-                                    activeConnections.Add(connectionID, connection);
-                                }
-
-                                // Start it only after adding it, because it may raise an event in which we will remove it.
-                                connection.Start();
+                                this.tcpEndpoint = null;
                             }
-                            else if (packet.RawBytes.Count >= 1 + sizeof(long) + 1
-                                && packet.RawBytes.Array[packet.RawBytes.Offset + 1 + sizeof(long)] == 0x01)
-                            {
-                                // Transmit the data packet (or shutdown the connection if the length is 0).
-                                // Need to copy the array because the caller might reuse the packet array.
-                                byte[] newPacket = new byte[packet.RawBytes.Count - 1 - sizeof(long) - 1];
-                                Array.Copy(packet.RawBytes.Array, packet.RawBytes.Offset + 1 + sizeof(long) + 1,
-                                    newPacket, 0, newPacket.Length);
+                        },
+                        streamModifier: this.ModifyStreamAsync);
 
-                                TcpTunnelConnection connection;
-                                lock (this.SyncRoot)
-                                {
-                                    if (!this.activeConnections.TryGetValue(connectionID, out connection))
-                                        connection = null;
-                                }
-                                connection?.EnqueuePacket(new ArraySegment<byte>(newPacket));
-                            }
-                            else if (packet.RawBytes.Count >= 1 + sizeof(long) + 1 + 4
-                                && packet.RawBytes.Array[packet.RawBytes.Offset + 1 + sizeof(long)] == 0x02)
-                            {
-                                // Update the receive window size.
-                                int windowSize = IPAddress.NetworkToHostOrder(BitConverter.ToInt32(packet.RawBytes.Array,
-                                    packet.RawBytes.Offset + 1 + sizeof(long) + 1));
-                                TcpTunnelConnection connection;
-                                lock (this.SyncRoot)
-                                {
-                                    if (!this.activeConnections.TryGetValue(connectionID, out connection))
-                                        connection = null;
-                                }
-                                connection?.UpdateReceiveWindow(windowSize);
-                            }
-
-                        }
-
-                    }
+                    await tcpEndpoint.RunEndpointAsync(() => this.RunEndpointAsync(tcpEndpoint));
                 }
                 finally
                 {
-                    HandleRemoteClientUnavailable();
-
-                    pingTimerSemaphore.Release();
-                    pingTimerTask?.Wait();
+                    client.Dispose();
                 }
             }
+            catch (Exception ex) when (ex.CanCatch())
+            {
+                // Ingore, and try again.
+            }
+
+            // Wait. TODO: Use a semaphore to exit faster.
+            await Task.Delay(2000);
         }
+    }
 
-        private TcpTunnelConnection CreateTcpTunnelConnection(TcpClientFramingEndpoint endpoint,
-            long currentSessionIteration, long connectionID,
-            TcpClient remoteClient, Func<Task> connectHandler = null)
+    private async ValueTask<Stream?> ModifyStreamAsync(
+        NetworkStream networkStream,
+        CancellationToken cancellationToken)
+    {
+        if (this.useSsl)
         {
-            return new TcpTunnelConnection(remoteClient,
-                connectHandler,
-                (receivePacket) =>
-                {
-                    // Received a packet.
-                    byte[] response = new byte[1 + sizeof(long) + sizeof(long) + 1 + receivePacket.Count];
-                    response[0] = 0x01;
-                    BitConverterUtils.ToBytes(IPAddress.HostToNetworkOrder(currentSessionIteration), response, 1);
-                    BitConverterUtils.ToBytes(IPAddress.HostToNetworkOrder(connectionID), response, 1 + sizeof(long));
-                    response[1 + sizeof(long) + sizeof(long)] = 0x01;
-                    Array.Copy(receivePacket.Array, receivePacket.Offset, response,
-                        1 + sizeof(long) + sizeof(long) + 1, receivePacket.Count);
-
-                    endpoint.SendMessageByQueue(response);
-
-                    if (receivePacket.Count == 0)
+            var sslStream = new SslStream(networkStream);
+            try
+            {
+                await sslStream.AuthenticateAsClientAsync(
+                    new SslClientAuthenticationOptions()
                     {
-                        // The connection has been closed, so remove it. The receive task might still run at this point,
-                        // but it doesn't raise any more events, it already closed the remoteClient, and the transmit task 
-                        // is also already finished at this point.
-                        lock (this.SyncRoot)
+                        TargetHost = this.hostname,
+                        EnabledSslProtocols = Constants.sslProtocols,
+                        CertificateRevocationCheckMode = X509RevocationMode.NoCheck,
+                    },
+                    cancellationToken);
+            }
+            catch
+            {
+                await sslStream.DisposeAsync();
+                throw;
+            }
+
+            return sslStream;
+        }
+        else
+        {
+            return null;
+        }
+    }
+
+    private async Task RunPingTaskAsync(
+        SemaphoreSlim pingTimerSemaphore,
+        TcpClientFramingEndpoint endpoint)
+    {
+        while (true)
+        {
+            bool exit = await pingTimerSemaphore.WaitAsync(30000);
+            if (exit)
+                return;
+
+            endpoint.SendMessageByQueue(new byte[] { 0xFF });
+        }
+    }
+
+    private async Task RunEndpointAsync(TcpClientFramingEndpoint endpoint)
+    {
+        using var pingTimerSemaphore = new SemaphoreSlim(0);
+        Task? pingTimerTask = null;
+
+        try
+        {
+            // Send the login string.
+            var loginString = new byte[2 + Constants.loginPrerequisiteBytes.Length +
+                sizeof(int) + this.sessionPasswordBytes.Length];
+
+            loginString[0] = 0x00;
+            loginString[1] = this.firstClientConnectionDescriptors is not null ? (byte)0x00 : (byte)0x01;
+
+            Constants.loginPrerequisiteBytes.CopyTo(loginString.AsMemory()[2..]);
+            BinaryPrimitives.WriteInt32BigEndian(
+                loginString.AsSpan()[(2 + Constants.loginPrerequisiteBytes.Length)..],
+                this.sessionId);
+
+            this.sessionPasswordBytes.Span.CopyTo(
+                loginString.AsSpan()[(2 + Constants.loginPrerequisiteBytes.Length + sizeof(int))..]);
+
+            endpoint.SendMessageByQueue(loginString);
+
+            // Start the ping timer task, then receive packets.
+            pingTimerTask = Task.Run(() => this.RunPingTaskAsync(pingTimerSemaphore, endpoint));
+
+            while (true)
+            {
+                var packet = await endpoint.ReceiveMessageAsync(MaxReceivePacketSize);
+                if (packet is null)
+                    return;
+
+                var packetBuffer = packet.Value.Buffer;
+
+                if (packetBuffer.Length >= 2 && packetBuffer.Span[0] is 0x02)
+                {
+                    // New Session Status.
+                    // We always first need to treat this as the partner client
+                    // being unavailable, because the server will send this only
+                    // once when the partner client is replaced.
+                    await this.HandlePartnerClientUnavailableAsync();
+
+                    bool removeClientAvailable = packetBuffer.Span[1] is 0x01;
+                    if (removeClientAvailable)
+                        this.HandlePartnerClientAvailable(endpoint);
+                }
+                else if (packetBuffer.Length >= 1 + sizeof(long) &&
+                    packetBuffer.Span[0] is Constants.TypeClientToClientCommunication)
+                {
+                    // Client to client communication.
+                    long connectionId = BinaryPrimitives.ReadInt64BigEndian(packetBuffer.Span[1..]);
+
+                    if (packetBuffer.Length >= 1 + sizeof(long) + 1 + sizeof(int) &&
+                        packetBuffer.Span[1 + sizeof(long)] is 0x00 &&
+                        this.firstClientConnectionDescriptors is null)
+                    {
+                        // Open a new connection, if we are not the first client.
+                        int port = BinaryPrimitives.ReadInt32BigEndian(
+                            packetBuffer.Span[(1 + sizeof(long) + 1)..]);
+
+                        string hostname = Encoding.UTF8.GetString(
+                            packetBuffer.Span[(1 + sizeof(long) + 1 + sizeof(int))..]);
+
+                        var remoteClient = new TcpClient();
+
+                        var connection = this.AddTcpTunnelConnection(
+                            endpoint,
+                            connectionId,
+                            remoteClient,
+                            async cancellationToken =>
+                            {
+                                await remoteClient.ConnectAsync(hostname, port, cancellationToken);
+
+                                // After the socket is connected, configure it to disable the Nagle
+                                // algorithm and delayed ACKs (and maybe enable TCP keep-alive in the
+                                // future).
+                                SocketConfigurator.ConfigureSocket(remoteClient.Client);
+                            });
+
+                        connection.Start();
+                    }
+                    else
+                    {
+                        TcpTunnelConnection? connection;
+                        lock (this.syncRoot)
                         {
-                            activeConnections.Remove(connectionID);
+                            // We might fail to find the connectionId if the connection
+                            // was already fully closed.
+                            this.activeConnections.TryGetValue(connectionId, out connection);
+                        }
+
+                        if (connection is not null)
+                        {
+                            if (packetBuffer.Length >= 1 + sizeof(long) + 1 &&
+                                packetBuffer.Span[1 + sizeof(long)] is 0x01)
+                            {
+                                // Transmit the data packet (or shutdown the connection if
+                                // the length is 0).
+                                // Need to copy the array because the caller might reuse
+                                // the packet array.
+                                var newPacket = new byte[packetBuffer.Length - (1 + sizeof(long) + 1)];
+                                packetBuffer[(1 + sizeof(long) + 1)..].CopyTo(newPacket);
+
+                                connection.EnqueuePacket(newPacket);
+                            }
+                            else if (packetBuffer.Length >= 1 + sizeof(long) + 1 &&
+                                packetBuffer.Span[1 + sizeof(long)] is 0x02)
+                            {
+                                // Abort the connection, which will reset it immediately. We
+                                // use StopAsync() to ensure the connection is removed from
+                                // the list of active connections before we continue.
+                                await connection.StopAsync();
+                            }
+                            else if (packetBuffer.Length >= 1 + sizeof(long) + 1 + sizeof(int) &&
+                                packetBuffer.Span[1 + sizeof(long)] is 0x03)
+                            {
+                                // Update the receive window size.
+                                int windowSize = BinaryPrimitives.ReadInt32BigEndian(
+                                    packetBuffer.Span[(1 + sizeof(long) + 1)..]);
+
+                                connection.UpdateReceiveWindow(windowSize);
+                            }
                         }
                     }
-                },
-                (window) =>
+                }
+            }
+        }
+        finally
+        {
+            await this.HandlePartnerClientUnavailableAsync();
+
+            pingTimerSemaphore.Release();
+            await (pingTimerTask ?? Task.CompletedTask);
+        }
+    }
+
+    private TcpTunnelConnection AddTcpTunnelConnection(
+        TcpClientFramingEndpoint endpoint,
+        long connectionId,
+        TcpClient remoteClient,
+        Func<CancellationToken, ValueTask>? connectHandler = null)
+    {
+        var connection = new TcpTunnelConnection(
+            remoteClient,
+            connectHandler,
+            receiveBuffer =>
+            {
+                // Forward the data packet.
+                var response = new byte[1 + sizeof(long) + 1 + receiveBuffer.Length];
+
+                response[0] = Constants.TypeClientToClientCommunication;
+                BinaryPrimitives.WriteInt64BigEndian(response.AsSpan()[1..], connectionId);
+                response[1 + sizeof(long)] = 0x01;
+                receiveBuffer.CopyTo(response.AsMemory()[(1 + sizeof(long) + 1)..]);
+
+                endpoint.SendMessageByQueue(response);
+            },
+            window =>
+            {
+                // Forward the transmit window update.
+                var response = new byte[1 + sizeof(long) + 1 + sizeof(int)];
+
+                response[0] = Constants.TypeClientToClientCommunication;
+                BinaryPrimitives.WriteInt64BigEndian(response.AsSpan()[1..], connectionId);
+                response[1 + sizeof(long)] = 0x03;
+                BinaryPrimitives.WriteInt32BigEndian(response.AsSpan()[(1 + sizeof(long) + 1)..], window);
+
+                endpoint.SendMessageByQueue(response);
+            },
+            isAbort =>
+            {
+                lock (this.syncRoot)
                 {
-                    // Got a transmit window update.
-                    byte[] response = new byte[1 + sizeof(long) + sizeof(long) + 1 + sizeof(int)];
-                    response[0] = 0x01;
-                    BitConverterUtils.ToBytes(IPAddress.HostToNetworkOrder(currentSessionIteration), response, 1);
-                    BitConverterUtils.ToBytes(IPAddress.HostToNetworkOrder(connectionID), response, 1 + sizeof(long));
-                    response[1 + sizeof(long) + sizeof(long)] = 0x02;
-                    BitConverterUtils.ToBytes(IPAddress.HostToNetworkOrder(window),
-                        response, 1 + sizeof(long) + sizeof(long) + 1);
+                    // The connection is finished, so remove it. Note that the receiveTask
+                    // is still running (we are being called from it, so we can't wait for
+                    // it by calling StopAsync()), but at this stage the connection is
+                    // considered to be finished and it doesn't have any more resources open,
+                    // so it is OK to just remove it.
+                    this.activeConnections.Remove(connectionId);
+                }
+
+                if (isAbort)
+                {
+                    // Notify the partner that the connection was aborted.
+                    var response = new byte[1 + sizeof(long) + 1];
+
+                    response[0] = Constants.TypeClientToClientCommunication;
+                    BinaryPrimitives.WriteInt64BigEndian(response.AsSpan()[1..], connectionId);
+                    response[1 + sizeof(long)] = 0x02;
 
                     endpoint.SendMessageByQueue(response);
-                });
-        }
+                }
+            });
 
-        private void HandleRemoteClientAvailable(TcpClientFramingEndpoint endpoint, long currentSessionIteration)
+        // Add the connection.
+        lock (this.syncRoot)
         {
-            if (!this.remoteClientAvailable)
-            {
-                this.remoteClientAvailable = true;
-
-                if (this.firstClientConnectionDescriptors != null)
-                {
-                    this.currentServer = new FirstClientServer(this.firstClientConnectionDescriptors, endpoint,
-                        (connectionID, client, portAndRemoteHost) => AcceptFirstClientServerClient(
-                            endpoint, currentSessionIteration, connectionID, client, portAndRemoteHost));
-                    this.currentServer.Start();
-                }
-            }
+            this.activeConnections.Add(connectionId, connection);
         }
 
-        private void HandleRemoteClientUnavailable()
+        // Return it so that the caller can start it. We cannot start it here already,
+        // since the caller might first need to send a message to the partner client
+        // to inform it about the new connection, and it cannot do that before calling
+        // this method as otherwise the caller might already receive events for the
+        // connection before we actually added it to the list of active connections.
+        return connection;
+    }
+
+    private void HandlePartnerClientAvailable(TcpClientFramingEndpoint endpoint)
+    {
+        this.remoteClientAvailable = true;
+
+        // Acknowledge the new session iteration. Sending this message must be done
+        // before starting the FirstClientServer.
+        var response = new byte[] { 0x03 };
+        endpoint.SendMessageByQueue(response);
+
+        if (this.firstClientConnectionDescriptors is not null)
         {
-            if (this.remoteClientAvailable)
-            {
-                this.remoteClientAvailable = false;
+            this.currentServer = new FirstClientServer(
+                this.firstClientConnectionDescriptors,
+                (connectionId, client, portAndRemoteHost) => this.AcceptFirstClientServerClient(
+                    endpoint,
+                    connectionId,
+                    client,
+                    portAndRemoteHost));
 
-                if (this.firstClientConnectionDescriptors != null)
-                {
-                    this.currentServer.Stop();
-                    this.currentServer = null;
-                }
-
-                // Close the connections.
-                // We need to copy the list since we wait for the connections to exit, and they might want
-                // to remove themselves from the list in the meanwhile.
-                var connectionsToWait = new List<KeyValuePair<long, TcpTunnelConnection>>();
-                lock (SyncRoot)
-                {
-                    connectionsToWait.AddRange(this.activeConnections);
-                }
-
-                foreach (var pair in connectionsToWait)
-                    pair.Value.Stop();
-
-                lock (SyncRoot)
-                {
-                    // Normally the dictionary should already be empty now.
-                    Debug.WriteLine(this.activeConnections.Count);
-                    this.activeConnections.Clear();
-                }
-            }
+            this.currentServer.Start();
         }
+    }
 
-        private void AcceptFirstClientServerClient(TcpClientFramingEndpoint endpoint,
-            long currentSessionIteration, long connectionID,
-            TcpClient client, TcpTunnelConnectionDescriptor descriptor)
+    private async ValueTask HandlePartnerClientUnavailableAsync()
+    {
+        if (this.remoteClientAvailable)
         {
-            byte[] hostnameBytes = Encoding.UTF8.GetBytes(descriptor.RemoteHost);
-            var response = new byte[1 + sizeof(long) + sizeof(long) + 1 + sizeof(int) + hostnameBytes.Length];
-            response[0] = 0x01;
-            BitConverterUtils.ToBytes(IPAddress.HostToNetworkOrder(currentSessionIteration), response, 1);
-            BitConverterUtils.ToBytes(IPAddress.HostToNetworkOrder(connectionID), response, 1 + sizeof(long));
-            response[1 + sizeof(long) + sizeof(long)] = 0x00;
-            BitConverterUtils.ToBytes(IPAddress.HostToNetworkOrder(descriptor.RemotePort),
-                response, 1 + sizeof(long) + sizeof(long) + 1);
-            Array.Copy(hostnameBytes, 0, response,
-                1 + sizeof(long) + sizeof(long) + 1 + sizeof(int), hostnameBytes.Length);
+            this.remoteClientAvailable = false;
 
-            endpoint.SendMessageByQueue(response);
-
-            // Start the connection after sending the initialization because it runs at another task and might
-            // already send window updates or receive packets.
-            var connection = CreateTcpTunnelConnection(endpoint, currentSessionIteration, connectionID, client);
-            lock (this.SyncRoot)
+            if (this.firstClientConnectionDescriptors is not null)
             {
-                this.activeConnections.Add(connectionID, connection);
+                // Wait until the server no longer accepts new connections.
+                await this.currentServer!.StopAsync();
+                this.currentServer = null;
             }
-            // Only start it after adding it, because it may raise an event in which we will remove it.
-            connection.Start();
+
+            // Close the connections.
+            // We need to copy the list since we wait for the connections to exit,
+            // and they might want to remove themselves from the list in the
+            // meanwhile.
+            var connectionsToWait = new List<TcpTunnelConnection>();
+            lock (this.syncRoot)
+            {
+                connectionsToWait.AddRange(this.activeConnections.Values);
+            }
+
+            // After waiting for all connections to stop, the activeConnections
+            // dictionary will be empty.
+            foreach (var pair in connectionsToWait)
+                await pair.StopAsync();
         }
+    }
+
+    private void AcceptFirstClientServerClient(
+        TcpClientFramingEndpoint endpoint,
+        long connectionId,
+        TcpClient client,
+        TcpTunnelConnectionDescriptor descriptor)
+    {
+        // Create and add the connection to our list of active connections. We must start
+        // it only AFTER sending the initialization message, because the connection runs
+        // on another task and might already receive packets (which might then arrive
+        // on the partner client before the initialization message arrives).
+        var connection = this.AddTcpTunnelConnection(endpoint, connectionId, client);
+
+        // Send the message not before we added the connection to our list of active
+        // connections. Otherwise, if we sent it earlier, it could happen that the
+        // partner client already sends events for the connection (like data packets),
+        // but we would discard them since we wouldn't yet find it in the list.
+        var hostnameBytes = Encoding.UTF8.GetBytes(descriptor.RemoteHost);
+        var response = new byte[1 + sizeof(long) + 1 + sizeof(int) + hostnameBytes.Length];
+        response[0] = Constants.TypeClientToClientCommunication;
+
+        BinaryPrimitives.WriteInt64BigEndian(response.AsSpan()[1..], connectionId);
+        response[1 + sizeof(long)] = 0x00;
+
+        BinaryPrimitives.WriteInt32BigEndian(
+            response.AsSpan()[(1 + sizeof(long) + 1)..],
+            descriptor.RemotePort);
+
+        hostnameBytes.CopyTo(response.AsSpan()[(1 + sizeof(long) + 1 + sizeof(int))..]);
+
+        endpoint.SendMessageByQueue(response);
+
+        // After sending the message, we can start the connection.
+        connection.Start();
     }
 }
