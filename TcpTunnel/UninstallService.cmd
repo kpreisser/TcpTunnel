@@ -1,2 +1,2 @@
-sc delete TcpTunnel
+sc delete "TcpTunnel"
 @pause
