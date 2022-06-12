@@ -221,10 +221,8 @@ public class TcpTunnelClient
 
             return sslStream;
         }
-        else
-        {
-            return null;
-        }
+
+        return null;
     }
 
     private async Task RunPingTaskAsync(

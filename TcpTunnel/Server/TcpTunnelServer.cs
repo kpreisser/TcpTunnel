@@ -220,11 +220,7 @@ public class TcpTunnelServer
         NetworkStream networkStream,
         CancellationToken cancellationToken)
     {
-        if (this.certificate is null)
-        {
-            return null;
-        }
-        else
+        if (this.certificate is not null)
         {
             var sslStream = new SslStream(networkStream);
             try
@@ -247,6 +243,8 @@ public class TcpTunnelServer
 
             return sslStream;
         }
+
+        return null;
     }
 
     public void Dispose()
