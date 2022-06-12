@@ -2,6 +2,8 @@
 using System.Runtime.Versioning;
 using System.ServiceProcess;
 
+using TcpTunnel.Runner;
+
 namespace TcpTunnel.ServiceSupport;
 
 [SupportedOSPlatform("windows")]

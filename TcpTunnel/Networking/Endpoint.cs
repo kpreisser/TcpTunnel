@@ -520,8 +520,6 @@ internal abstract partial class Endpoint
                         catch (Exception ex) when (ex.CanCatch())
                         {
                             // The connection is probably already closed/aborted.
-                            Debug.WriteLine(ex.ToString());
-
                             // Note: Don't return here as that will dispose the
                             // messageQueueSemaphore, which will then cause the code in
                             // OnHandleClose() to throw a exception as it will expect that

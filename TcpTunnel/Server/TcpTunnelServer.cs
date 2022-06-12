@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Net.Security;
 using System.Net.Sockets;
@@ -22,17 +23,27 @@ public class TcpTunnelServer
     public const int MaxReceivePacketSize = 2 * 1024 * 1024;
     public const int MaxSendBufferSize = 5 * 1024 * 1024;
 
+    private readonly int port;
     private readonly X509Certificate2? certificate;
 
     private readonly TcpListener listener;
     private readonly Dictionary<ServerConnectionHandler, (Task task, bool canCancelEndpoint)> activeHandlers = new();
 
+    private readonly Action<string>? logger;
+
     private Task? listenerTask;
     private bool stopped;
 
-    public TcpTunnelServer(int port, X509Certificate2? certificate, IDictionary<int, string> sessions)
+    public TcpTunnelServer(
+        int port,
+        X509Certificate2? certificate,
+        IDictionary<int, string> sessions,
+        Action<string>? logger = null)
     {
+        this.port = port;
         this.certificate = certificate;
+        this.logger = logger;
+
         this.Sessions = new SortedDictionary<int, Session>();
 
         foreach (var pair in sessions)
@@ -51,8 +62,16 @@ public class TcpTunnelServer
         get;
     } = new();
 
+    internal Action<string>? Logger
+    {
+        get => this.logger;
+    }
+
     public void Start()
     {
+        this.logger?.Invoke(
+            $"Listener started on port '{this.port.ToString(CultureInfo.InvariantCulture)}'.");
+
         this.listener.Start();
         this.listenerTask = ExceptionUtils.StartTask(this.RunListenerTask);
     }
@@ -96,6 +115,9 @@ public class TcpTunnelServer
                 // future).
                 SocketConfigurator.ConfigureSocket(client.Client);
 
+                var remoteEndpoint = client.Client.RemoteEndPoint!;
+                this.logger?.Invoke($"Accepted connection from '{remoteEndpoint}'.");
+
                 var handler = default(ServerConnectionHandler);
                 var endpoint = new TcpClientFramingEndpoint(
                     client,
@@ -128,7 +150,7 @@ public class TcpTunnelServer
                     },
                     streamModifier: this.ModifyStreamAsync);
 
-                handler = new ServerConnectionHandler(this, endpoint);
+                handler = new ServerConnectionHandler(this, endpoint, remoteEndpoint);
 
                 lock (this.activeHandlers)
                 {
@@ -142,7 +164,6 @@ public class TcpTunnelServer
                         catch (Exception ex) when (ex.CanCatch())
                         {
                             // Ignore.
-                            Debug.WriteLine(ex.ToString());
                         }
                         finally
                         {
@@ -153,6 +174,8 @@ public class TcpTunnelServer
                                 // Remove the handler.
                                 this.activeHandlers.Remove(handler);
                             }
+
+                            this.logger?.Invoke($"Closed connection from '{remoteEndpoint}'.");
                         }
                     });
 

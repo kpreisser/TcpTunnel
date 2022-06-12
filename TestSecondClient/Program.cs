@@ -7,13 +7,15 @@ namespace TestSecondClient
 {
     class Program
     {
-        static void Main(string[] args)
+        static void Main()
         {
-            var firstClient = new TcpTunnelClient("localhost", 23654, false, 15, Encoding.UTF8.GetBytes("testPasswort"), null);
+            static void LogConsole(string s) => Console.WriteLine(s);
+
+            var firstClient = new TcpTunnelClient("localhost", 23654, false, 15, Encoding.UTF8.GetBytes("testPasswort"), null, LogConsole);
             firstClient.Start();
 
             Console.WriteLine($"Client started.");
-            Console.ReadKey();
+            Console.ReadLine();
             Console.WriteLine("Stopping client...");
             firstClient.Stop();
             Console.WriteLine("Client stopped.");

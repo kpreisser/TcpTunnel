@@ -1,5 +1,6 @@
 ﻿using System;
 
+using TcpTunnel.Runner;
 using TcpTunnel.ServiceSupport;
 
 namespace TcpTunnel
@@ -15,12 +16,14 @@ namespace TcpTunnel
             }
             else
             {
+                static void LogConsole(string s) => Console.WriteLine(s);
+
                 Console.WriteLine("Starting...");
-                var runner = new TcpTunnelRunner();
+                var runner = new TcpTunnelRunner(LogConsole);
                 runner.Start();
 
-                Console.WriteLine("Started. Press key to exit.");
-                Console.ReadKey();
+                Console.WriteLine("Started. Press ENTER to exit.");
+                Console.ReadLine();
 
                 Console.WriteLine("Stopping...");
                 runner.Stop();

@@ -10,12 +10,19 @@ using TcpTunnel.Client;
 using TcpTunnel.Server;
 using TcpTunnel.Utils;
 
-namespace TcpTunnel
+namespace TcpTunnel.Runner
 {
     internal class TcpTunnelRunner
     {
+        private readonly Action<string>? logger;
+
         private TcpTunnelServer? server;
         private TcpTunnelClient? client;
+
+        public TcpTunnelRunner(Action<string>? logger = null)
+        {
+            this.logger = logger;
+        }
 
         public void Start()
         {
@@ -62,7 +69,7 @@ namespace TcpTunnel
                     }
                 }
 
-                this.server = new TcpTunnelServer(port, certificate, sessions);
+                this.server = new TcpTunnelServer(port, certificate, sessions, this.logger);
                 this.server.Start();
             }
             else if (string.Equals(applicationType, "proxyclient", StringComparison.OrdinalIgnoreCase) ||
@@ -111,7 +118,8 @@ namespace TcpTunnel
                     useSsl,
                     sessionId,
                     Encoding.UTF8.GetBytes(sessionPassword),
-                    descriptors);
+                    descriptors,
+                    this.logger);
 
                 this.client.Start();
             }

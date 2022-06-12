@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
-using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Net.Security;
 using System.Net.Sockets;
@@ -36,6 +36,8 @@ public class TcpTunnelClient
     private readonly int sessionId;
     private readonly ReadOnlyMemory<byte> sessionPasswordBytes;
 
+    private readonly Action<string>? logger;
+
     /// <summary>
     /// The first client is the one that provides server functionality by listening
     /// on specific ports.
@@ -62,7 +64,8 @@ public class TcpTunnelClient
         bool useSsl,
         int sessionId,
         ReadOnlyMemory<byte> sessionPasswordBytes,
-        IReadOnlyList<TcpTunnelConnectionDescriptor>? firstClientConnectionDescriptors)
+        IReadOnlyList<TcpTunnelConnectionDescriptor>? firstClientConnectionDescriptors,
+        Action<string>? logger = null)
     {
         this.hostname = hostname;
         this.port = port;
@@ -70,6 +73,7 @@ public class TcpTunnelClient
         this.sessionId = sessionId;
         this.sessionPasswordBytes = sessionPasswordBytes;
         this.firstClientConnectionDescriptors = firstClientConnectionDescriptors;
+        this.logger = logger;
     }
 
     public void Start()
@@ -95,6 +99,8 @@ public class TcpTunnelClient
 
     private async Task RunReadTaskAsync()
     {
+        this.logger?.Invoke($"Connecting...");
+
         while (true)
         {
             lock (this.syncRoot)
@@ -107,6 +113,7 @@ public class TcpTunnelClient
             {
                 var client = new TcpClient();
 
+                bool wasConnected = false; 
                 try
                 {
                     var tcpEndpoint = default(TcpClientFramingEndpoint);
@@ -133,6 +140,13 @@ public class TcpTunnelClient
                             // algorithm and delayed ACKs (and maybe enable TCP keep-alive in the
                             // future).
                             SocketConfigurator.ConfigureSocket(client.Client);
+
+                            wasConnected = true;
+
+                            this.logger?.Invoke(
+                                $"Connection established to gateway " +
+                                $"'{this.hostname}:{this.port.ToString(CultureInfo.InvariantCulture)}'. " +
+                                $"Authenticating...");
                         },
                         closeHandler: () =>
                         {
@@ -150,6 +164,9 @@ public class TcpTunnelClient
                 finally
                 {
                     client.Dispose();
+
+                    if (wasConnected)
+                        this.logger?.Invoke($"Connection to gateway closed. Reconnecting...");
                 }
             }
             catch (Exception ex) when (ex.CanCatch())
@@ -245,14 +262,18 @@ public class TcpTunnelClient
 
                 if (packetBuffer.Length >= 2 && packetBuffer.Span[0] is 0x02)
                 {
+                    bool remoteClientAvailable = packetBuffer.Span[1] is 0x01;
+                    this.logger?.Invoke(
+                        $"Session Update: Remote Client Available: " +
+                        $"{(remoteClientAvailable ? "Yes" : "No")}.");
+
                     // New Session Status.
                     // We always first need to treat this as the partner client
                     // being unavailable, because the server will send this only
                     // once when the partner client is replaced.
                     await this.HandlePartnerClientUnavailableAsync();
 
-                    bool removeClientAvailable = packetBuffer.Span[1] is 0x01;
-                    if (removeClientAvailable)
+                    if (remoteClientAvailable)
                         this.HandlePartnerClientAvailable(endpoint);
                 }
                 else if (packetBuffer.Length >= 1 + sizeof(long) &&

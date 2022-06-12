@@ -6,6 +6,8 @@ using System.Threading.Tasks;
 
 using TcpTunnel.Networking;
 
+using SystemNetEndpoint = System.Net.EndPoint;
+
 namespace TcpTunnel.Server;
 
 /*
@@ -25,16 +27,21 @@ internal class ServerConnectionHandler
 {
     private readonly TcpTunnelServer server;
     private readonly TcpClientFramingEndpoint endpoint;
+    private readonly SystemNetEndpoint clientEndpoint;
 
     private bool firstClient;
     private Session? authenticatedSession;
 
     private int sessionIterationsToAcknowledge;
 
-    public ServerConnectionHandler(TcpTunnelServer server, TcpClientFramingEndpoint endpoint)
+    public ServerConnectionHandler(
+        TcpTunnelServer server, 
+        TcpClientFramingEndpoint endpoint, 
+        SystemNetEndpoint clientEndpoint)
     {
         this.server = server;
         this.endpoint = endpoint;
+        this.clientEndpoint = clientEndpoint;
     }
 
     public TcpClientFramingEndpoint Endpoint
@@ -94,6 +101,10 @@ internal class ServerConnectionHandler
                                         this.firstClient = firstClient;
 
                                         int clientIdx = this.firstClient ? 0 : 1;
+
+                                        this.server.Logger?.Invoke(
+                                            $"Client '{this.clientEndpoint}' authenticated for Session ID '{sessionId}' " +
+                                            $"({(this.firstClient ? "proxy-listener" : "proxy-client")}).");
 
                                         // Check if an old client is present.
                                         // TODO: What should happen with that connection?
