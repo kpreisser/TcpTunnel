@@ -1,15 +1,15 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio 14
-VisualStudioVersion = 14.0.25420.1
+# Visual Studio Version 17
+VisualStudioVersion = 17.2.32526.322
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TcpTunnel", "TcpTunnel\TcpTunnel.csproj", "{7E3317F6-E20D-4A40-B4EC-733CEC525A5F}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "TcpTunnel", "TcpTunnel\TcpTunnel.csproj", "{7E3317F6-E20D-4A40-B4EC-733CEC525A5F}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TestServer", "TestServer\TestServer.csproj", "{EDA04F3D-9424-4DBD-AB23-E06BD587798B}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "TestGateway", "TestGateway\TestGateway.csproj", "{EDA04F3D-9424-4DBD-AB23-E06BD587798B}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TestFirstClient", "TestFirstClient\TestFirstClient.csproj", "{821B7471-76C6-498B-A254-0E5BBE150F39}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "TestProxyServer", "TestProxyServer\TestProxyServer.csproj", "{821B7471-76C6-498B-A254-0E5BBE150F39}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TestSecondClient", "TestSecondClient\TestSecondClient.csproj", "{5368590A-8168-452A-963D-B6B5ABD1640E}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "TestProxyClient", "TestProxyClient\TestProxyClient.csproj", "{5368590A-8168-452A-963D-B6B5ABD1640E}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -36,5 +36,8 @@ Global
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {13436B29-0A4D-4EB0-8C61-45B77F632194}
 	EndGlobalSection
 EndGlobal

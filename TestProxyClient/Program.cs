@@ -1,9 +1,9 @@
 ﻿using System;
-using System.Collections.Generic;
+using System.Text;
 
-using TcpTunnel.Server;
+using TcpTunnel.Proxy;
 
-namespace TestServer
+namespace TestProxyClient
 {
     class Program
     {
@@ -11,15 +11,14 @@ namespace TestServer
         {
             static void LogConsole(string s) => Console.WriteLine(s);
 
-            int port = 23654;
-            var server = new TcpTunnelServer(port, null, new Dictionary<int, string>() { { 15, "testPasswort" } }, LogConsole);
-            server.Start();
+            var firstClient = new Proxy("localhost", 23654, false, 15, Encoding.UTF8.GetBytes("testPasswort"), null, LogConsole);
+            firstClient.Start();
 
-            Console.WriteLine($"Server started at port {port}.");
+            Console.WriteLine($"Proxy-Client started.");
             Console.ReadLine();
-            Console.WriteLine("Stopping server...");
-            server.Stop();
-            Console.WriteLine("Server stopped.");
+            Console.WriteLine("Stopping Proxy-Client...");
+            firstClient.Stop();
+            Console.WriteLine("Proxy-Client stopped.");
 
             //new System.Threading.Thread(() =>
             //{

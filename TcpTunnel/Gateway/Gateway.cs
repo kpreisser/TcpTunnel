@@ -15,9 +15,9 @@ using SimpleSocketClient;
 using TcpTunnel.Networking;
 using TcpTunnel.Utils;
 
-namespace TcpTunnel.Server;
+namespace TcpTunnel.Gateway;
 
-public class TcpTunnelServer
+public class Gateway
 {
     public const int MaxReceivePacketSize = 2 * 1024 * 1024;
     public const int MaxSendBufferSize = 5 * 1024 * 1024;
@@ -26,14 +26,14 @@ public class TcpTunnelServer
     private readonly X509Certificate2? certificate;
 
     private readonly TcpListener listener;
-    private readonly Dictionary<ServerConnectionHandler, (Task task, bool canCancelEndpoint)> activeHandlers = new();
+    private readonly Dictionary<GatewayConnectionHandler, (Task task, bool canCancelEndpoint)> activeHandlers = new();
 
     private readonly Action<string>? logger;
 
     private Task? listenerTask;
     private bool stopped;
 
-    public TcpTunnelServer(
+    public Gateway(
         int port,
         X509Certificate2? certificate,
         IDictionary<int, string> sessions,
@@ -120,7 +120,7 @@ public class TcpTunnelServer
                 var remoteEndpoint = client.Client.RemoteEndPoint!;
                 this.logger?.Invoke($"Accepted connection from '{remoteEndpoint}'.");
 
-                var handler = default(ServerConnectionHandler);
+                var handler = default(GatewayConnectionHandler);
                 var endpoint = new TcpClientFramingEndpoint(
                     client,
                     useSendQueue: true,
@@ -152,7 +152,7 @@ public class TcpTunnelServer
                     },
                     streamModifier: this.ModifyStreamAsync);
 
-                handler = new ServerConnectionHandler(this, endpoint, remoteEndpoint);
+                handler = new GatewayConnectionHandler(this, endpoint, remoteEndpoint);
 
                 lock (this.activeHandlers)
                 {
@@ -187,7 +187,7 @@ public class TcpTunnelServer
         }
         finally
         {
-            // Stop all active clients.
+            // Stop all active connections.
             // Need to add the tasks in a separate list, because we cannot wait for them
             // while we hold the lock for activeHandlers, otherwise a deadlock might occur
             // because the handlers also remove themselves from that dictionary.

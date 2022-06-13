@@ -1,9 +1,9 @@
 ﻿using System;
-using System.Text;
+using System.Collections.Generic;
 
-using TcpTunnel.Client;
+using TcpTunnel.Gateway;
 
-namespace TestSecondClient
+namespace TestGateway
 {
     class Program
     {
@@ -11,14 +11,15 @@ namespace TestSecondClient
         {
             static void LogConsole(string s) => Console.WriteLine(s);
 
-            var firstClient = new TcpTunnelClient("localhost", 23654, false, 15, Encoding.UTF8.GetBytes("testPasswort"), null, LogConsole);
-            firstClient.Start();
+            int port = 23654;
+            var server = new Gateway(port, null, new Dictionary<int, string>() { { 15, "testPasswort" } }, LogConsole);
+            server.Start();
 
-            Console.WriteLine($"Client started.");
+            Console.WriteLine($"Gateway started at port {port}.");
             Console.ReadLine();
-            Console.WriteLine("Stopping client...");
-            firstClient.Stop();
-            Console.WriteLine("Client stopped.");
+            Console.WriteLine("Stopping gateway...");
+            server.Stop();
+            Console.WriteLine("Gateway stopped.");
 
             //new System.Threading.Thread(() =>
             //{

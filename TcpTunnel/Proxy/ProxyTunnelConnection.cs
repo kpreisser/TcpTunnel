@@ -7,9 +7,9 @@ using System.Threading.Tasks;
 
 using TcpTunnel.Utils;
 
-namespace TcpTunnel.Client;
+namespace TcpTunnel.Proxy;
 
-internal class TcpTunnelConnection
+internal class ProxyTunnelConnection
 {
     private readonly TcpClient remoteClient;
 
@@ -38,7 +38,7 @@ internal class TcpTunnelConnection
     private bool transmitTaskStopped;
     private bool ctsDisposed;
 
-    public TcpTunnelConnection(
+    public ProxyTunnelConnection(
         TcpClient remoteClient,
         Func<CancellationToken, ValueTask>? connectHandler,
         Action<Memory<byte>>? receiveHandler,
@@ -268,7 +268,7 @@ internal class TcpTunnelConnection
                     this.receiveHandler?.Invoke(Memory<byte>.Empty);
 
                 // Wait for the transmit task to stop. This can take a while if the partner
-                // client doesn't yet send a close.
+                // proxy doesn't yet send a close.
                 if (transmitTask is not null)
                 {
                     if (isAbort)
@@ -353,7 +353,7 @@ internal class TcpTunnelConnection
             // Additionally, abort it here to ensure that when the receive task is
             // already waiting for the transmit task to complete (when the remote
             // already half-closed the connection), it can then report the abort
-            // to the partner client.
+            // to the partner proxy.
             this.Abort();
         }
         finally

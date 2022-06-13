@@ -25,10 +25,10 @@
     <None Update="sample-settings-gateway.txt">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
-    <None Update="sample-settings-proxyclient.txt">
+    <None Update="sample-settings-proxy-client.txt">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
-    <None Update="sample-settings-proxylistener.txt">
+    <None Update="sample-settings-proxy-server.txt">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
     <None Update="UninstallService.cmd">

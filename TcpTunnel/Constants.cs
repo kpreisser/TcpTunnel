@@ -11,7 +11,9 @@ internal class Constants
 
     public const SslProtocols sslProtocols = SslProtocols.Tls12 | SslProtocols.Tls13;
 
-    public const byte TypeClientToClientCommunication = 0x20;
+    public const byte TypeProxyToProxyCommunication = 0x20;
+
+    public const long ProxyClientId = 0;
 
     #region Login Prerequisite String
 

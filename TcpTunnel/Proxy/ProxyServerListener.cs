@@ -8,22 +8,22 @@ using SimpleSocketClient;
 
 using TcpTunnel.Utils;
 
-namespace TcpTunnel.Client;
+namespace TcpTunnel.Proxy;
 
-internal class FirstClientListener
+internal class ProxyServerListener
 {
-    private readonly IReadOnlyList<TcpTunnelConnectionDescriptor> connectionDescriptors;
-    private readonly Action<long, TcpClient, TcpTunnelConnectionDescriptor> clientAcceptor;
+    private readonly IReadOnlyList<ProxyServerConnectionDescriptor> connectionDescriptors;
+    private readonly Action<long, TcpClient, ProxyServerConnectionDescriptor> clientAcceptor;
 
-    private readonly List<(TcpListener listener, Task task)> firstClientListeners = new();
+    private readonly List<(TcpListener listener, Task task)> listeners = new();
     private readonly object syncRoot = new();
 
     private long nextConnectionId;
     private bool stopped;
 
-    public FirstClientListener(
-        IReadOnlyList<TcpTunnelConnectionDescriptor> connectionDescriptors,
-        Action<long, TcpClient, TcpTunnelConnectionDescriptor> clientAcceptor)
+    public ProxyServerListener(
+        IReadOnlyList<ProxyServerConnectionDescriptor> connectionDescriptors,
+        Action<long, TcpClient, ProxyServerConnectionDescriptor> clientAcceptor)
     {
         this.connectionDescriptors = connectionDescriptors;
         this.clientAcceptor = clientAcceptor;
@@ -56,7 +56,7 @@ internal class FirstClientListener
             var listenerTask = ExceptionUtils.StartTask(
                 () => this.RunListenerTask(listener, descriptor));
 
-            this.firstClientListeners.Add((listener, listenerTask));
+            this.listeners.Add((listener, listenerTask));
         }
     }
 
@@ -64,18 +64,18 @@ internal class FirstClientListener
     {
         Volatile.Write(ref this.stopped, true);
 
-        foreach (var tuple in this.firstClientListeners)
+        foreach (var tuple in this.listeners)
         {
             tuple.listener.Stop();
             tuple.task.GetAwaiter().GetResult();
         }
 
-        this.firstClientListeners.Clear();
+        this.listeners.Clear();
     }
 
     private async Task RunListenerTask(
         TcpListener listener,
-        TcpTunnelConnectionDescriptor connectionDescriptor)
+        ProxyServerConnectionDescriptor connectionDescriptor)
     {
         while (true)
         {

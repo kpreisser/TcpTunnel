@@ -2,9 +2,9 @@
 using System.Collections.Generic;
 using System.Text;
 
-using TcpTunnel.Client;
+using TcpTunnel.Proxy;
 
-namespace TestFirstClient
+namespace TestProxyServer
 {
     class Program
     {
@@ -12,19 +12,19 @@ namespace TestFirstClient
         {
             static void LogConsole(string s) => Console.WriteLine(s);
 
-            var firstClient = new TcpTunnelClient("127.0.0.1", 23654, false, 15, Encoding.UTF8.GetBytes("testPasswort"), new List<TcpTunnelConnectionDescriptor>()
+            var firstClient = new Proxy("127.0.0.1", 23654, false, 15, Encoding.UTF8.GetBytes("testPasswort"), new List<ProxyServerConnectionDescriptor>()
             {
                 //new TcpTunnelConnectionDescriptor(null, 8080, "www.preisser-it.de", 80)
-                new TcpTunnelConnectionDescriptor(null, 43, "whois.ripe.net", 43)
+                new ProxyServerConnectionDescriptor(null, 43, "whois.ripe.net", 43)
             }, LogConsole);
 
             firstClient.Start();
 
-            Console.WriteLine($"Client started.");
+            Console.WriteLine($"Proxy-Server started.");
             Console.ReadLine();
-            Console.WriteLine("Stopping client...");
+            Console.WriteLine("Stopping Proxy-Server...");
             firstClient.Stop();
-            Console.WriteLine("Client stopped.");
+            Console.WriteLine("Proxy-Server stopped.");
 
             //new System.Threading.Thread(() =>
             //{

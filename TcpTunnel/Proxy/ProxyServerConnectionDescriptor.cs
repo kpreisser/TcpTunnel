@@ -1,11 +1,11 @@
 ﻿using System;
 using System.Net;
 
-namespace TcpTunnel.Client;
+namespace TcpTunnel.Proxy;
 
-public class TcpTunnelConnectionDescriptor
+public class ProxyServerConnectionDescriptor
 {
-    public TcpTunnelConnectionDescriptor(
+    public ProxyServerConnectionDescriptor(
         IPAddress? listenIP,
         int listenPort,
         string remoteHost,

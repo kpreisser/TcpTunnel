@@ -6,8 +6,8 @@ using System.Net;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 
-using TcpTunnel.Client;
-using TcpTunnel.Server;
+using TcpTunnel.Proxy;
+using TcpTunnel.Gateway;
 using TcpTunnel.Utils;
 
 namespace TcpTunnel.Runner
@@ -16,8 +16,8 @@ namespace TcpTunnel.Runner
     {
         private readonly Action<string>? logger;
 
-        private TcpTunnelServer? server;
-        private TcpTunnelClient? client;
+        private Gateway.Gateway? server;
+        private Proxy.Proxy? client;
 
         public TcpTunnelRunner(Action<string>? logger = null)
         {
@@ -69,11 +69,11 @@ namespace TcpTunnel.Runner
                     }
                 }
 
-                this.server = new TcpTunnelServer(port, certificate, sessions, this.logger);
+                this.server = new Gateway.Gateway(port, certificate, sessions, this.logger);
                 this.server.Start();
             }
-            else if (string.Equals(applicationType, "proxyclient", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(applicationType, "proxylistener", StringComparison.OrdinalIgnoreCase) &&
+            else if (string.Equals(applicationType, "proxy-client", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(applicationType, "proxy-server", StringComparison.OrdinalIgnoreCase) &&
                     (isProxyListener = true))
             {
                 // Hostname, Port, Usessl, SessionID, SessionPasswort, Line 7....: Port + "," + Hostname
@@ -87,11 +87,11 @@ namespace TcpTunnel.Runner
                 int sessionId = int.Parse(settingsLines[4].Trim(), CultureInfo.InvariantCulture);
                 string sessionPassword = settingsLines[5];
 
-                var descriptors = default(List<TcpTunnelConnectionDescriptor>);
+                var descriptors = default(List<ProxyServerConnectionDescriptor>);
 
                 if (isProxyListener)
                 {
-                    descriptors = new List<TcpTunnelConnectionDescriptor>();
+                    descriptors = new List<ProxyServerConnectionDescriptor>();
 
                     for (int i = 6; i < settingsLines.Length; i++)
                     {
@@ -103,7 +103,7 @@ namespace TcpTunnel.Runner
                         string remoteHost = lineEntries[2];
                         int remotePort = int.Parse(lineEntries[3], CultureInfo.InvariantCulture);
 
-                        descriptors.Add(new TcpTunnelConnectionDescriptor(
+                        descriptors.Add(new ProxyServerConnectionDescriptor(
                             listenIP,
                             listenPort,
                             remoteHost,
@@ -112,7 +112,7 @@ namespace TcpTunnel.Runner
                     }
                 }
 
-                this.client = new TcpTunnelClient(
+                this.client = new Proxy.Proxy(
                     hostname,
                     port,
                     useSsl,
