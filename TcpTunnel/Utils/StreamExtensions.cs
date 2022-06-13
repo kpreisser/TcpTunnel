@@ -7,6 +7,8 @@ namespace TcpTunnel.Utils;
 
 internal static class StreamExtensions
 {
+    // TODO: For .NET 7.0, use Stream.ReadAtLeastAsync() instead.
+    // See: https://github.com/dotnet/runtime/issues/16598
     public static async ValueTask<bool> ReadCompleteAsync(
             this Stream stream,
             Memory<byte> buffer,
