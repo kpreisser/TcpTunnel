@@ -153,13 +153,13 @@ internal class TcpClientEndpoint : Endpoint
             this.currentReadBufferFromPool = null;
         }
 
-        await base.HandleCloseAsync();
+        await base.HandleCloseAsync().ConfigureAwait(false);
 
         // Dispose the stream.
         // Note: Disposing the TcpClient itself should be done by the caller
         // because he passed the instance to us.
         if (this.stream is not null)
-            await this.stream.DisposeAsync();
+            await this.stream.DisposeAsync().ConfigureAwait(false);
 
         this.closeHandler?.Invoke();
     }
