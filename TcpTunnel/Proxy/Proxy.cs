@@ -288,6 +288,9 @@ public class Proxy
                     {
                         partnerProxyId = BinaryPrimitives.ReadInt64BigEndian(packetBuffer.Span);
                         packetBuffer = packetBuffer[sizeof(long)..];
+
+                        if (partnerProxyId is Constants.ProxyClientId)
+                            throw new InvalidDataException();
                     }
 
                     bool partnerProxyAvailable = packetBuffer.Span[0] is 0x01;
@@ -314,6 +317,9 @@ public class Proxy
                     {
                         partnerProxyId = BinaryPrimitives.ReadInt64BigEndian(packetBuffer.Span);
                         packetBuffer = packetBuffer[sizeof(long)..];
+
+                        if (partnerProxyId is Constants.ProxyClientId)
+                            throw new InvalidDataException();
                     }
 
                     // We don't need a lock to access the dictionary here since it is

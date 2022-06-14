@@ -75,7 +75,8 @@ internal class ProxyTunnelConnection
         // Add the initial window size.
         this.UpdateReceiveWindow(Constants.InitialWindowSize);
 
-        // Create the receive task (the transmit task will be created by the receive task).
+        // Create the receive task (the transmit task will later be created by the
+        // receive task).
         this.receiveTask = ExceptionUtils.StartTask(this.RunReceiveTaskAsync);
     }
 

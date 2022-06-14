@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Buffers.Binary;
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Threading;
@@ -100,6 +101,8 @@ internal class GatewayConnectionHandler
                             if (isProxyClient)
                             {
                                 long partnerProxyId = BinaryPrimitives.ReadInt64BigEndian(packetBuffer.Span[1..]);
+                                if (partnerProxyId is Constants.ProxyClientId)
+                                    throw new InvalidDataException();
 
                                 if (session.Proxies.TryGetValue(partnerProxyId, out var partnerProxy))
                                 {
@@ -114,8 +117,8 @@ internal class GatewayConnectionHandler
                                     partnerProxy.endpoint.SendMessageByQueue(targetPacket);
                                 }
                             }
-                            else if (session.Proxies.TryGetValue(Constants.ProxyClientId, out var partnerProxy) &&
-                                this.sessionIterationsToAcknowledge is 0)
+                            else if (this.sessionIterationsToAcknowledge is 0 &&
+                                session.Proxies.TryGetValue(Constants.ProxyClientId, out var partnerProxy))
                             {
                                 // Add the sender proxy ID.
                                 var targetPacket = new byte[packetBuffer.Length + sizeof(long)];
@@ -180,7 +183,8 @@ internal class GatewayConnectionHandler
                                             Constants.ProxyClientId :
                                             checked(session.NextProxyId++);
 
-                                        Debug.Assert(isProxyClient || this.proxyId is not 0);
+                                        Debug.Assert(
+                                            isProxyClient || this.proxyId is not Constants.ProxyClientId);
 
                                         // Check if an old proxy-client is present.
                                         // TODO: What should happen with that connection?
