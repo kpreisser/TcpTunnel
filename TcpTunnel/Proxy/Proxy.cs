@@ -26,7 +26,7 @@ namespace TcpTunnel.Proxy;
  * 8 bytes ConnectionID + 0x02: Abort the connection.
  * 8 bytes ConnectionID + 0x03 + 4 bytes window size: Update receive window.
  */
-public class Proxy
+public class Proxy : IInstance
 {
     public const int MaxReceivePacketSize = 2 * 1024 * 1024;
 

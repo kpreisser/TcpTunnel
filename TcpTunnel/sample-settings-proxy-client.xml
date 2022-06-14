@@ -1,0 +1,6 @@
+﻿<Settings xmlns="https://github.com/kpreisser/TcpTunnel">
+	<Instance type="proxy-client" host="localhost" port="23654" useSsl="1">
+		<!-- You can specify only one Session here. -->
+		<Session id="123" password="my_secret_password_client" />
+	</Instance>
+</Settings>

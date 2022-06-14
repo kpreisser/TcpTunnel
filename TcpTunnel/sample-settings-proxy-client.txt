@@ -1,6 +1,0 @@
-﻿proxy-client
-localhost#                   Gateway Hostname
-23654#                       Gateway Port
-1#                           Use SSL/TLS
-123#                         Session ID
-my_secret_password#          Session Password

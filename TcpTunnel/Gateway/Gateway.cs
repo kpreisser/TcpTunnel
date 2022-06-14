@@ -17,7 +17,7 @@ using TcpTunnel.Utils;
 
 namespace TcpTunnel.Gateway;
 
-public class Gateway
+public class Gateway : IInstance
 {
     public const int MaxReceivePacketSize = 2 * 1024 * 1024;
     public const int MaxSendBufferSize = 5 * 1024 * 1024;
@@ -36,7 +36,7 @@ public class Gateway
     public Gateway(
         int port,
         X509Certificate2? certificate,
-        IDictionary<int, string> sessions,
+        IDictionary<int, (string proxyClientPassword, string proxyServerPassword)> sessions,
         Action<string>? logger = null)
     {
         this.port = port;
@@ -49,7 +49,13 @@ public class Gateway
         this.Sessions = sessionDictionary;
 
         foreach (var pair in sessions)
-            sessionDictionary.Add(pair.Key, new Session(Encoding.UTF8.GetBytes(pair.Value)));
+        {
+            sessionDictionary.Add(
+                pair.Key,
+                new Session(
+                    Encoding.UTF8.GetBytes(pair.Value.proxyClientPassword),
+                    Encoding.UTF8.GetBytes(pair.Value.proxyServerPassword)));
+        }
 
         this.listener = TcpListener.Create(port);
     }

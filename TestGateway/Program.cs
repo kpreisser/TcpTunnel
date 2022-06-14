@@ -12,7 +12,14 @@ namespace TestGateway
             static void LogConsole(string s) => Console.WriteLine(s);
 
             int port = 23654;
-            var server = new Gateway(port, null, new Dictionary<int, string>() { { 15, "testPasswort" } }, LogConsole);
+            var server = new Gateway(
+                port,
+                null,
+                new Dictionary<int, (string proxyClientPassword, string proxyServerPassword)>() { 
+                    { 15, ( "testClientPasswort", "testServerPassword") } 
+                },
+                LogConsole);
+
             server.Start();
 
             Console.WriteLine($"Gateway started at port {port}.");

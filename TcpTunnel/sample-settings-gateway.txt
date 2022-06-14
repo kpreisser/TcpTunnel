@@ -1,5 +1,0 @@
-﻿gateway
-23654#                                       Listen Port
-0000000000000000000000000000000000000000#    Cert Hash when using SSL/TLS, or empty to not use SSL/TLS
-123,my_secret_password#                      Session-ID and Password
-124,my_other_password#                       Session-ID and Password (etc.)

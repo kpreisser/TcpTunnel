@@ -160,9 +160,13 @@ internal class GatewayConnectionHandler
                             {
                                 // Verify the session password. For this, we need to
                                 // use FixedTimeEquals to prevent timing attacks.
+                                var correctPasswordBytes = isProxyClient ?
+                                    session.ProxyClientPasswordBytes :
+                                    session.ProxyServerPasswordBytes;
+
                                 if (CryptographicOperations.FixedTimeEquals(
                                     enteredPasswordBytes.Span,
-                                    session.PasswordBytes.Span))
+                                    correctPasswordBytes.Span))
                                 {
                                     // Proxy authenticated successfully for the given
                                     // session ID.

@@ -5,134 +5,202 @@ using System.IO;
 using System.Net;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
+using System.Xml.Linq;
 
 using TcpTunnel.Proxy;
-using TcpTunnel.Gateway;
 using TcpTunnel.Utils;
 
 namespace TcpTunnel.Runner
 {
     internal class TcpTunnelRunner
     {
+        private static readonly XNamespace xmlNamespace = "https://github.com/kpreisser/TcpTunnel";
+
         private readonly Action<string>? logger;
 
-        private Gateway.Gateway? server;
-        private Proxy.Proxy? client;
+        private readonly List<IInstance> instances;
 
         public TcpTunnelRunner(Action<string>? logger = null)
         {
             this.logger = logger;
+
+            this.instances = new();
         }
 
         public void Start()
         {
             // Load the settings text file.
-            string settingsPath = Path.Combine(Path.GetDirectoryName(Environment.ProcessPath)!, "settings.txt");
-            string settingsContent = File.ReadAllText(settingsPath, Encoding.UTF8).Replace("\r", "");
-            string[] settingsLines = settingsContent.Split("\n", StringSplitOptions.None);
+            XDocument settingsDoc;
+            string settingsPath = Path.Combine(
+                Path.GetDirectoryName(Environment.ProcessPath)!,
+                "settings.xml");
 
-            // Remove "#"
-            for (int i = 0; i < settingsLines.Length; i++)
+            using (var fileStream = new FileStream(
+                settingsPath,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.Read))
+                settingsDoc = XDocument.Load(fileStream, LoadOptions.None);
+
+            var rootEl = settingsDoc.Root;
+            if (rootEl?.Name.LocalName is not "Settings" || rootEl.Name.Namespace != xmlNamespace)
+                throw new InvalidDataException(
+                    $"Root element 'Settings' not found in namespace '{xmlNamespace}'.");
+
+            var instanceElements = rootEl.Elements(xmlNamespace + "Instance");
+
+            try
             {
-                int commentIdx = settingsLines[i].IndexOf("#");
-                if (commentIdx >= 0)
-                    settingsLines[i] = settingsLines[i][..commentIdx];
-            }
-
-            string applicationType = settingsLines[0].Trim();
-            bool isProxyListener = false;
-
-            if (string.Equals(applicationType, "gateway", StringComparison.OrdinalIgnoreCase))
-            {
-                // Line 2: Port, Line 3: Certificate Thumbprint (if not empty), Lines 4...: SessionID + "," + SessionPasswort
-                int port = int.Parse(settingsLines[1].Trim(), CultureInfo.InvariantCulture);
-                string certificateThumbprint = settingsLines[2].Trim();
-                var certificate = default(X509Certificate2);
-
-                if (certificateThumbprint.Length > 0)
+                foreach (var instanceElement in instanceElements)
                 {
-                    certificate = CertificateUtils.GetCurrentUserOrLocalMachineCertificateFromFingerprint(
-                        certificateThumbprint);
-                }
+                    string applicationType = instanceElement.Attribute("type")?.Value ??
+                        throw new InvalidDataException("Missing attribute 'type'.");
 
-                var sessions = new Dictionary<int, string>();
-                for (int i = 3; i < settingsLines.Length; i++)
-                {
-                    string line = settingsLines[i];
+                    bool isProxyListener = false;
 
-                    int commaIndex = line.IndexOf(",");
-                    if (commaIndex > 0)
+                    if (string.Equals(applicationType, "gateway", StringComparison.OrdinalIgnoreCase))
                     {
-                        int sessionId = int.Parse(line[..commaIndex], CultureInfo.InvariantCulture);
-                        string sessionPassword = line[(commaIndex + 1)..];
-                        sessions.Add(sessionId, sessionPassword);
+                        ushort port = ushort.Parse(
+                            instanceElement.Attribute("port")?.Value ??
+                                throw new InvalidDataException("Missing attribute 'port'."),
+                            CultureInfo.InvariantCulture);
+
+                        string? certificateThumbprint = instanceElement.Attribute("certificateHash")?.Value;
+                        var certificate = default(X509Certificate2);
+
+                        if (!string.IsNullOrEmpty(certificateThumbprint))
+                        {
+                            certificate = CertificateUtils.GetCurrentUserOrLocalMachineCertificateFromFingerprint(
+                                certificateThumbprint);
+                        }
+
+                        var sessions = new Dictionary<int, (
+                            string proxyClientPassword,
+                            string proxyServerPassword
+                        )>();
+
+                        foreach (var sessionElement in instanceElement.Elements(xmlNamespace + "Session"))
+                        {
+                            int sessionId = int.Parse(
+                                sessionElement.Attribute("id")?.Value ??
+                                    throw new InvalidDataException("Missing attribute 'id'."),
+                                CultureInfo.InvariantCulture);
+
+                            string proxyClientPassword = sessionElement.Attribute("proxyClientPassword")?.Value ??
+                                    throw new InvalidDataException("Missing attribute 'proxyClientPassword'.");
+
+                            string proxyServerPassword = sessionElement.Attribute("proxyServerPassword")?.Value ??
+                                    throw new InvalidDataException("Missing attribute 'proxyServerPassword'.");
+
+                            if (!sessions.TryAdd(sessionId, (proxyClientPassword, proxyServerPassword)))
+                                throw new InvalidDataException(
+                                    $"Duplicate session ID \"{sessionId.ToString(CultureInfo.InvariantCulture)}\".");
+                        }
+
+                        var server = new Gateway.Gateway(port, certificate, sessions, this.logger);
+                        server.Start();
+
+                        this.instances.Add(server);
+                    }
+                    else if (string.Equals(applicationType, "proxy-client", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(applicationType, "proxy-server", StringComparison.OrdinalIgnoreCase) &&
+                            (isProxyListener = true))
+                    {
+                        string host = instanceElement.Attribute("host")?.Value ??
+                               throw new InvalidDataException("Missing attribute 'host'.");
+
+                        ushort port = ushort.Parse(
+                           instanceElement.Attribute("port")?.Value ??
+                               throw new InvalidDataException("Missing attribute 'port'."),
+                           CultureInfo.InvariantCulture);
+
+                        bool useSsl = instanceElement.Attribute("useSsl")?.Value is string useSslParam &&
+                            (useSslParam is "1" ||
+                                string.Equals(
+                                    useSslParam,
+                                    "true",
+                                    StringComparison.OrdinalIgnoreCase) ||
+                                string.Equals(
+                                    useSslParam,
+                                    "yes",
+                                    StringComparison.OrdinalIgnoreCase));
+
+                        var sessionElement = instanceElement.Element(xmlNamespace + "Session") ??
+                            throw new InvalidDataException("Missing 'Session' element.");
+
+                        int sessionId = int.Parse(
+                            sessionElement.Attribute("id")?.Value ??
+                                throw new InvalidDataException("Missing attribute 'id'."),
+                            CultureInfo.InvariantCulture);
+
+                        string password = sessionElement.Attribute("password")?.Value ??
+                            throw new InvalidDataException("Missing attribute 'password'.");
+
+                        var descriptors = default(List<ProxyServerConnectionDescriptor>);
+
+                        if (isProxyListener)
+                        {
+                            descriptors = new List<ProxyServerConnectionDescriptor>();
+
+                            foreach (var bindingElement in sessionElement.Elements(xmlNamespace + "Binding"))
+                            {
+                                var listenIp = bindingElement.Attribute("listenIp")?.Value is { } listenIpString ?
+                                    IPAddress.Parse(listenIpString) :
+                                    null;
+
+                                ushort listenPort = ushort.Parse(
+                                   bindingElement.Attribute("listenPort")?.Value ??
+                                       throw new InvalidDataException("Missing attribute 'listenPort'."),
+                                   CultureInfo.InvariantCulture);
+
+                                string targetHost = bindingElement.Attribute("targetHost")?.Value ??
+                                    throw new InvalidDataException("Missing attribute 'targetHost'.");
+
+                                ushort targetPort = ushort.Parse(
+                                   bindingElement.Attribute("targetPort")?.Value ??
+                                       throw new InvalidDataException("Missing attribute 'targetPort'."),
+                                   CultureInfo.InvariantCulture);
+
+                                descriptors.Add(new ProxyServerConnectionDescriptor(
+                                    listenIp,
+                                    listenPort,
+                                    targetHost,
+                                    targetPort));
+                            }
+                        }
+
+                        var client = new Proxy.Proxy(
+                            host,
+                            port,
+                            useSsl,
+                            sessionId,
+                            Encoding.UTF8.GetBytes(password),
+                            descriptors,
+                            this.logger);
+
+                        client.Start();
+
+                        this.instances.Add(client);
+                    }
+                    else
+                    {
+                        throw new InvalidDataException("Unknown application type.");
                     }
                 }
-
-                this.server = new Gateway.Gateway(port, certificate, sessions, this.logger);
-                this.server.Start();
             }
-            else if (string.Equals(applicationType, "proxy-client", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(applicationType, "proxy-server", StringComparison.OrdinalIgnoreCase) &&
-                    (isProxyListener = true))
+            catch
             {
-                // Hostname, Port, Usessl, SessionID, SessionPasswort, Line 7....: Port + "," + Hostname
-                string hostname = settingsLines[1].Trim();
-                int port = int.Parse(settingsLines[2].Trim(), CultureInfo.InvariantCulture);
-                bool useSsl = settingsLines[3] is string line3 && (line3 is "1" || string.Equals(
-                    line3,
-                    "true",
-                    StringComparison.OrdinalIgnoreCase));
-
-                int sessionId = int.Parse(settingsLines[4].Trim(), CultureInfo.InvariantCulture);
-                string sessionPassword = settingsLines[5];
-
-                var descriptors = default(List<ProxyServerConnectionDescriptor>);
-
-                if (isProxyListener)
-                {
-                    descriptors = new List<ProxyServerConnectionDescriptor>();
-
-                    for (int i = 6; i < settingsLines.Length; i++)
-                    {
-                        string line = settingsLines[i].Trim();
-                        var lineEntries = line.Split(new string[] { "," }, StringSplitOptions.None);
-
-                        var listenIP = lineEntries[0].Length is 0 ? null : IPAddress.Parse(lineEntries[0]);
-                        int listenPort = int.Parse(lineEntries[1], CultureInfo.InvariantCulture);
-                        string remoteHost = lineEntries[2];
-                        int remotePort = int.Parse(lineEntries[3], CultureInfo.InvariantCulture);
-
-                        descriptors.Add(new ProxyServerConnectionDescriptor(
-                            listenIP,
-                            listenPort,
-                            remoteHost,
-                            remotePort));
-
-                    }
-                }
-
-                this.client = new Proxy.Proxy(
-                    hostname,
-                    port,
-                    useSsl,
-                    sessionId,
-                    Encoding.UTF8.GetBytes(sessionPassword),
-                    descriptors,
-                    this.logger);
-
-                this.client.Start();
-            }
-            else
-            {
-                throw new ArgumentException("Unknown application type.");
+                this.Stop();
+                throw;
             }
         }
 
         public void Stop()
         {
-            this.server?.Stop();
-            this.client?.Stop();
+            for (int i = this.instances.Count - 1; i >= 0; i--)
+                instances[i].Stop();
+
+            this.instances.Clear();
         }
     }
 }

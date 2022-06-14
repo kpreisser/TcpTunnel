@@ -1,0 +1,9 @@
+﻿<Settings xmlns="https://github.com/kpreisser/TcpTunnel">
+	<!-- certificateHash is specified when using SSL/TLS, or omitted when not using SSL/TLS. -->
+	<Instance type="gateway" port="23654" certificateHash="0000000000000000000000000000000000000000">
+		<!-- Specifies a session. Note that multiple proxy-server clients can connect, but only
+		     one proxy-client can connect. -->
+		<Session id="123" proxyClientPassword="my_secret_password_client" proxyServerPassword="my_secret_password_server" />
+		<Session id="124" proxyClientPassword="my_other_password_client" proxyServerPassword="my_other_password_server" />
+	</Instance>
+</Settings>

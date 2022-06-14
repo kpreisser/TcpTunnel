@@ -22,13 +22,13 @@
     <None Update="InstallService.cmd">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
-    <None Update="sample-settings-gateway.txt">
+    <None Update="sample-settings-gateway.xml">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
-    <None Update="sample-settings-proxy-client.txt">
+    <None Update="sample-settings-proxy-client.xml">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
-    <None Update="sample-settings-proxy-server.txt">
+    <None Update="sample-settings-proxy-server.xml">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
     <None Update="UninstallService.cmd">

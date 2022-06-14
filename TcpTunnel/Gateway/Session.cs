@@ -5,12 +5,20 @@ namespace TcpTunnel.Gateway;
 
 internal class Session
 {
-    public Session(ReadOnlyMemory<byte> passwordBytes)
+    public Session(
+        ReadOnlyMemory<byte> proxyClientPasswordBytes,
+        ReadOnlyMemory<byte> proxyServerPasswordBytes)
     {
-        this.PasswordBytes = passwordBytes;
+        this.ProxyClientPasswordBytes = proxyClientPasswordBytes;
+        this.ProxyServerPasswordBytes = proxyServerPasswordBytes;
     }
 
-    public ReadOnlyMemory<byte> PasswordBytes
+    public ReadOnlyMemory<byte> ProxyClientPasswordBytes
+    {
+        get;
+    }
+
+    public ReadOnlyMemory<byte> ProxyServerPasswordBytes
     {
         get;
     }

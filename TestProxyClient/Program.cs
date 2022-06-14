@@ -11,7 +11,7 @@ namespace TestProxyClient
         {
             static void LogConsole(string s) => Console.WriteLine(s);
 
-            var firstClient = new Proxy("localhost", 23654, false, 15, Encoding.UTF8.GetBytes("testPasswort"), null, LogConsole);
+            var firstClient = new Proxy("localhost", 23654, false, 15, Encoding.UTF8.GetBytes("testClientPasswort"), null, LogConsole);
             firstClient.Start();
 
             Console.WriteLine($"Proxy-Client started.");
