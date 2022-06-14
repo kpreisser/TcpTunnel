@@ -174,7 +174,7 @@ internal class GatewayConnectionHandler
 
                                     this.gateway.Logger?.Invoke(
                                         $"Proxy '{this.clientEndpoint}' authenticated for Session ID '{sessionId}' " +
-                                        $"({(isProxyClient ? "proxy-server" : "proxy-client")}).");
+                                        $"({(isProxyClient ? "proxy-client" : "proxy-server")}).");
 
                                     // Enter the lock again. We don't need to check whether
                                     // authenticatedSession is still null, as it can only be
