@@ -3,7 +3,7 @@
     <!-- You can specify only one Session here. -->
     <Session id="123" password="my_secret_password_server">
       <!-- Specify bindings on which the proxy-server should listen.
-               Note: listenIp is optional. -->
+           Note: listenIp is optional. -->
       <Binding listenIp="127.2.3.4" listenPort="8080" targetHost="www.preisser-it.de" targetPort="80" />
       <Binding listenPort="43" targetHost="whois.ripe.net" targetPort="43" />
     </Session>
