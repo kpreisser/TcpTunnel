@@ -351,8 +351,7 @@ internal class ProxyTunnelConnection
                 }
 
                 // Only raise the window update event if we reached the threshold,
-                // to avoid producing flooding the connection with small window
-                // updates.
+                // to avoid flooding the connection with small window updates.
                 if (availableWindow >= Constants.WindowThreshold)
                 {
                     this.transmitWindowUpdateHandler?.Invoke(availableWindow);
