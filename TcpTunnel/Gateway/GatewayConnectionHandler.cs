@@ -23,7 +23,7 @@ namespace TcpTunnel.Gateway;
  * - Proxy-Server: Listens on the specified IP/Port combinations for incoming TCP connections, and then sends the connection request to the partner proxy-client.
  * 
  * PROTOCOL (Frame Payload) GATEWAY COMMUNICATION:
- * 0x00: (Proxy to Gateway) Authentication + Proxy-Type (0x01 for proxy-listener) + Login-Prerequisite-String + Session-ID (int) + Session-Password
+ * 0x00: (Proxy to Gateway) Authentication + Proxy-Type (0x01 for proxy-server) + Login-Prerequisite-String + Session-ID (int) + Session-Password
  * 0x01: (Gateway to Proxy) Authentication failed, try again.
  * 0x02: (Gateway to Proxy) Session Status (sent after successfull authentication if partner proxies are available, and during runtime if status changes):
  *     + [if proxy is proxy-client) Partner Proxy ID (Int64)
@@ -174,7 +174,7 @@ internal class GatewayConnectionHandler
 
                                     this.gateway.Logger?.Invoke(
                                         $"Proxy '{this.clientEndpoint}' authenticated for Session ID '{sessionId}' " +
-                                        $"({(isProxyClient ? "proxy-listener" : "proxy-client")}).");
+                                        $"({(isProxyClient ? "proxy-server" : "proxy-client")}).");
 
                                     // Enter the lock again. We don't need to check whether
                                     // authenticatedSession is still null, as it can only be

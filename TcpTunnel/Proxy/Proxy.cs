@@ -41,7 +41,7 @@ public class Proxy : IInstance
     private readonly Action<string>? logger;
 
     /// <summary>
-    /// If this proxy is a proxy-listener, contains the connection descriptors
+    /// If this proxy is a proxy-server, contains the connection descriptors
     /// for which <see cref="TcpListener"/>s are created.
     /// </summary>
     private readonly IReadOnlyList<ProxyServerConnectionDescriptor>? proxyServerConnectionDescriptors;
