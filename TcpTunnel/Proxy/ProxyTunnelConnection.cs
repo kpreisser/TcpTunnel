@@ -212,7 +212,9 @@ internal class ProxyTunnelConnection
                             }
                         }
 
-                        if (availableWindow >= Constants.InitialWindowSize / 48)
+                        // Only continue when the available window is at least as high as
+                        // the window threshold, to avoid scattered packets.
+                        if (availableWindow >= Constants.WindowThreshold)
                             break;
 
                         // Insufficient window is available, so we need to wait.
@@ -323,6 +325,8 @@ internal class ProxyTunnelConnection
     {
         try
         {
+            int availableWindow = 0;
+
             while (true)
             {
                 await this.transmitPacketQueueSemaphore.WaitAsync(this.cts.Token);
@@ -341,7 +345,19 @@ internal class ProxyTunnelConnection
                 await remoteClientStream.FlushAsync(this.cts.Token);
 
                 // Update the transmit window.
-                this.transmitWindowUpdateHandler?.Invoke(packet.Length);
+                checked
+                {
+                    availableWindow += packet.Length;
+                }
+
+                // Only raise the window update event if we reached the threshold,
+                // to avoid producing flooding the connection with small window
+                // updates.
+                if (availableWindow >= Constants.WindowThreshold)
+                {
+                    this.transmitWindowUpdateHandler?.Invoke(availableWindow);
+                    availableWindow = 0;
+                }
             }
         }
         catch (Exception ex) when (ex.CanCatch())

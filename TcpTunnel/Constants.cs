@@ -5,9 +5,17 @@ namespace TcpTunnel;
 
 internal class Constants
 {
-    public const int ReceiveBufferSize = 32 * 1024;
-
     public const int InitialWindowSize = 384 * 1024;
+
+    /// <summary>
+    /// Specifies the threshold for the available window before we can start to receive data.
+    /// Additionally, we will only send a window update to the partner if it reached this threshold.
+    /// </summary>
+    public const int WindowThreshold = InitialWindowSize / 12;
+
+    // The receive buffer should not be larger than the receive threashold, to avoid
+    // scattered packets due to too less window being available.
+    public const int ReceiveBufferSize = WindowThreshold;
 
     public const SslProtocols sslProtocols = SslProtocols.Tls12 | SslProtocols.Tls13;
 
