@@ -96,9 +96,8 @@ internal class ProxyServerListener
             }
 
             // After the socket is connected, configure it to disable the Nagle
-            // algorithm and delayed ACKs (and maybe enable TCP keep-alive in the
-            // future).
-            SocketConfigurator.ConfigureSocket(client.Client);
+            // algorithm, disable delayed ACKs, and enable TCP keep-alive.
+            SocketConfigurator.ConfigureSocket(client.Client, enableKeepAlive: true);
 
             // Handle the client.
             long newConnectionId;

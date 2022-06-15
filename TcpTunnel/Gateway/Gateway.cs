@@ -119,9 +119,8 @@ public class Gateway : IInstance
                 }
 
                 // After the socket is connected, configure it to disable the Nagle
-                // algorithm and delayed ACKs (and maybe enable TCP keep-alive in the
-                // future).
-                SocketConfigurator.ConfigureSocket(client.Client);
+                // algorithm, disable delayed ACKs, and enable TCP keep-alive.
+                SocketConfigurator.ConfigureSocket(client.Client, enableKeepAlive: true);
 
                 var remoteEndpoint = client.Client.RemoteEndPoint!;
                 this.logger?.Invoke($"Accepted connection from '{remoteEndpoint}'.");

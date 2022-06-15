@@ -153,9 +153,8 @@ public class Proxy : IInstance
                             await client.ConnectAsync(this.hostname, this.port, cancellationToken);
 
                             // After the socket is connected, configure it to disable the Nagle
-                            // algorithm and delayed ACKs (and maybe enable TCP keep-alive in the
-                            // future).
-                            SocketConfigurator.ConfigureSocket(client.Client);
+                            // algorithm, disable delayed ACKs, and enable TCP keep-alive.
+                            SocketConfigurator.ConfigureSocket(client.Client, enableKeepAlive: true);
 
                             wasConnected = true;
 
@@ -359,9 +358,10 @@ public class Proxy : IInstance
                                     await remoteClient.ConnectAsync(hostname, port, cancellationToken);
 
                                     // After the socket is connected, configure it to disable the Nagle
-                                    // algorithm and delayed ACKs (and maybe enable TCP keep-alive in the
-                                    // future).
-                                    SocketConfigurator.ConfigureSocket(remoteClient.Client);
+                                    // algorithm, disable delayed ACKs, and enable TCP keep-alive.
+                                    SocketConfigurator.ConfigureSocket(
+                                        remoteClient.Client,
+                                        enableKeepAlive: true);
                                 });
                         }
                     }
