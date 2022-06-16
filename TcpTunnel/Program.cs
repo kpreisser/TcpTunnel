@@ -11,7 +11,7 @@ namespace TcpTunnel
         {
             if (OperatingSystem.IsWindows() && Array.IndexOf(args, "-service") >= 0)
             {
-                // Run the application as a service that has been installed with InstallUtil.exe
+                // Run the application as a service.
                 TcpTunnelService.RunService();
             }
             else

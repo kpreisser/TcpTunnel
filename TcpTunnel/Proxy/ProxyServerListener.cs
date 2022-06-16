@@ -36,7 +36,7 @@ internal class ProxyServerListener
         // Create listeners.
         foreach (var descriptor in this.connectionDescriptors)
         {
-            TcpListener listener;
+            var listener = default(TcpListener);
             try
             {
                 if (descriptor.ListenIP is null)
@@ -46,8 +46,18 @@ internal class ProxyServerListener
 
                 listener.Start();
             }
-            catch (Exception ex) when (ex.CanCatch())
+            catch
             {
+                // Stop() will dispose the underlying socket.
+                try
+                {
+                    listener?.Stop();
+                }
+                catch (Exception ex) when (ex.CanCatch())
+                {
+                    // Ignore
+                }
+
                 // Stop the previously started listeners, then rethrow the exception.
                 this.Stop();
                 throw;
@@ -64,10 +74,19 @@ internal class ProxyServerListener
     {
         Volatile.Write(ref this.stopped, true);
 
-        foreach (var tuple in this.listeners)
+        foreach (var (listener, task) in this.listeners)
         {
-            tuple.listener.Stop();
-            tuple.task.GetAwaiter().GetResult();
+            try
+            {
+                listener.Stop();
+            }
+            catch (Exception ex) when (ex.CanCatch())
+            {
+                // Ignore
+            }
+
+            // Wait for the listener task to finish.
+            task.GetAwaiter().GetResult();
         }
 
         this.listeners.Clear();
@@ -90,8 +109,10 @@ internal class ProxyServerListener
                 if (Volatile.Read(ref this.stopped))
                     break;
 
-                // It is another error, so ignore it. This can sometimes happen when the
-                // client closed the connection directly after accepting it.
+                // It is another error, so ignore it. This can happen when the
+                // client closes the connection immediately after it was accepted,
+                // and we are currently not yet waiting in AcceptTcpClientAsync()
+                // (due to processing a previous socket).
                 continue;
             }
 

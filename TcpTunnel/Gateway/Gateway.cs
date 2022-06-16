@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Net;
 using System.Net.Security;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
@@ -22,25 +23,20 @@ public class Gateway : IInstance
     public const int MaxReceivePacketSize = 2 * 1024 * 1024;
     public const int MaxSendBufferSize = 5 * 1024 * 1024;
 
-    private readonly int port;
-    private readonly X509Certificate2? certificate;
+    private readonly IReadOnlyList<(IPAddress? ip, int port, X509Certificate2? certificate)> listenEntries;
 
-    private readonly TcpListener listener;
-    private readonly Dictionary<GatewayConnectionHandler, (Task task, bool canCancelEndpoint)> activeHandlers = new();
+    private readonly List<(TcpListener listener, Task task)> activeListeners = new();
 
     private readonly Action<string>? logger;
 
-    private Task? listenerTask;
     private bool stopped;
 
     public Gateway(
-        int port,
-        X509Certificate2? certificate,
-        IDictionary<int, (string proxyClientPassword, string proxyServerPassword)> sessions,
+        IReadOnlyList<(IPAddress? ip, int port, X509Certificate2? certificate)> listenEntries,
+        IReadOnlyDictionary<int, (string proxyClientPassword, string proxyServerPassword)> sessions,
         Action<string>? logger = null)
     {
-        this.port = port;
-        this.certificate = certificate;
+        this.listenEntries = listenEntries;
         this.logger = logger;
 
         this.SyncRoot = new();
@@ -56,8 +52,6 @@ public class Gateway : IInstance
                     Encoding.UTF8.GetBytes(pair.Value.proxyClientPassword),
                     Encoding.UTF8.GetBytes(pair.Value.proxyServerPassword)));
         }
-
-        this.listener = TcpListener.Create(port);
     }
 
     internal IReadOnlyDictionary<int, Session> Sessions
@@ -77,26 +71,75 @@ public class Gateway : IInstance
 
     public void Start()
     {
-        this.logger?.Invoke(
-            $"Gateway listener started on port '{this.port.ToString(CultureInfo.InvariantCulture)}'.");
+        Volatile.Write(ref this.stopped, false);
 
-        this.listener.Start();
-        this.listenerTask = ExceptionUtils.StartTask(this.RunListenerTask);
+        foreach (var (ip, port, certificate) in this.listenEntries)
+        {
+            var listener = default(TcpListener);
+            try
+            {
+                if (ip is null)
+                    listener = TcpListener.Create(port);
+                else
+                    listener = new TcpListener(ip, port);
+
+                listener.Start();
+            }
+            catch
+            {
+                // Stop() will dispose the underlying socket.
+                try
+                {
+                    listener?.Stop();
+                }
+                catch (Exception ex) when (ex.CanCatch())
+                {
+                    // Ignore
+                }
+
+                // Stop the previously started listeners, then rethrow the exception.
+                this.Stop();
+                throw;
+            }
+
+            this.logger?.Invoke(
+                $"Gateway listener started on '{ip?.ToString() ?? "<any>"}:{port.ToString(CultureInfo.InvariantCulture)}'.");
+
+            var listenerTask = ExceptionUtils.StartTask(
+                () => this.RunListenerTask(listener, certificate));
+
+            this.activeListeners.Add((listener, listenerTask));
+        }
     }
 
     public void Stop()
     {
         Volatile.Write(ref this.stopped, true);
-        this.listener.Stop();
 
-        // Wait for the listener task.
-        this.listenerTask!.Wait();
-        this.listenerTask.Dispose();
+        foreach (var (listener, listenerTask) in this.activeListeners)
+        {
+            try
+            {
+                listener.Stop();
+            }
+            catch (Exception ex) when (ex.CanCatch())
+            {
+                // Ignore
+            }
+
+            // Wait for the listener task to finish.
+            listenerTask.GetAwaiter().GetResult();
+        }
+
+        this.activeListeners.Clear();
     }
 
-    private async Task RunListenerTask()
+    private async Task RunListenerTask(TcpListener listener, X509Certificate2? certificate)
     {
         bool isStopped = false;
+        var streamModifier = ModifyStreamAsync;
+
+        var activeHandlers = new Dictionary<GatewayConnectionHandler, (Task task, bool canCancelEndpoint)>();
 
         try
         {
@@ -105,7 +148,7 @@ public class Gateway : IInstance
                 TcpClient client;
                 try
                 {
-                    client = await this.listener.AcceptTcpClientAsync();
+                    client = await listener.AcceptTcpClientAsync();
                 }
                 catch (Exception ex) when (ex.CanCatch())
                 {
@@ -113,8 +156,10 @@ public class Gateway : IInstance
                     if (Volatile.Read(ref this.stopped))
                         break;
 
-                    // It is another error, so ignore it. This can sometimes happen when the
-                    // client closed the connection directly after accepting it.
+                    // It is another error, so ignore it. This can happen when the
+                    // client closes the connection immediately after it was accepted,
+                    // and we are currently not yet waiting in AcceptTcpClientAsync()
+                    // (due to processing a previous socket).
                     continue;
                 }
 
@@ -134,12 +179,12 @@ public class Gateway : IInstance
                     {
                         // Beginning from this stage, the endpoint can be
                         // canceled.
-                        lock (this.activeHandlers)
+                        lock (activeHandlers)
                         {
                             if (isStopped)
                                 throw new OperationCanceledException();
 
-                            CollectionsMarshal.GetValueRefOrNullRef(this.activeHandlers, handler!)
+                            CollectionsMarshal.GetValueRefOrNullRef(activeHandlers, handler!)
                                 .canCancelEndpoint = true;
                         }
 
@@ -149,17 +194,17 @@ public class Gateway : IInstance
                     {
                         // Once this handler returns, the endpoint may no longer
                         // be canceled.
-                        lock (this.activeHandlers)
+                        lock (activeHandlers)
                         {
-                            CollectionsMarshal.GetValueRefOrNullRef(this.activeHandlers, handler!)
+                            CollectionsMarshal.GetValueRefOrNullRef(activeHandlers, handler!)
                                 .canCancelEndpoint = false;
                         }
                     },
-                    streamModifier: this.ModifyStreamAsync);
+                    streamModifier: streamModifier);
 
                 handler = new GatewayConnectionHandler(this, endpoint, remoteEndpoint);
 
-                lock (this.activeHandlers)
+                lock (activeHandlers)
                 {
                     // Start a task to handle the endpoint.
                     var runTask = ExceptionUtils.StartTask(async () =>
@@ -174,19 +219,26 @@ public class Gateway : IInstance
                         }
                         finally
                         {
-                            client.Dispose();
+                            try
+                            {
+                                client.Dispose();
+                            }
+                            catch (Exception ex) when (ex.CanCatch())
+                            {
+                                // Ignore
+                            }
 
-                            lock (this.activeHandlers)
+                            lock (activeHandlers)
                             {
                                 // Remove the handler.
-                                this.activeHandlers.Remove(handler);
+                                activeHandlers.Remove(handler);
                             }
 
                             this.logger?.Invoke($"Closed connection from '{remoteEndpoint}'.");
                         }
                     });
 
-                    this.activeHandlers.Add(handler, (runTask, false));
+                    activeHandlers.Add(handler, (runTask, false));
                 }
             }
         }
@@ -197,11 +249,11 @@ public class Gateway : IInstance
             // while we hold the lock for activeHandlers, otherwise a deadlock might occur
             // because the handlers also remove themselves from that dictionary.
             var tasksToWaitFor = new List<Task>();
-            lock (this.activeHandlers)
+            lock (activeHandlers)
             {
                 isStopped = true;
 
-                foreach (var cl in this.activeHandlers)
+                foreach (var cl in activeHandlers)
                 {
                     if (cl.Value.canCancelEndpoint)
                         cl.Key.Endpoint.Cancel();
@@ -219,37 +271,37 @@ public class Gateway : IInstance
                 await t;
             }
         }
-    }
 
-    private async ValueTask<Stream?> ModifyStreamAsync(
-        NetworkStream networkStream,
-        CancellationToken cancellationToken)
-    {
-        if (this.certificate is not null)
+        async ValueTask<Stream?> ModifyStreamAsync(
+            NetworkStream networkStream,
+            CancellationToken cancellationToken)
         {
-            var sslStream = new SslStream(networkStream);
-            try
+            if (certificate is not null)
             {
-                await sslStream.AuthenticateAsServerAsync(
-                    new SslServerAuthenticationOptions()
-                    {
-                        // AllowRenegotiation is still true by default up to .NET 6.0.
-                        AllowRenegotiation = false,
-                        ServerCertificate = this.certificate,
-                        EnabledSslProtocols = Constants.sslProtocols
-                    },
-                    cancellationToken);
-            }
-            catch
-            {
-                await sslStream.DisposeAsync();
-                throw;
+                var sslStream = new SslStream(networkStream);
+                try
+                {
+                    await sslStream.AuthenticateAsServerAsync(
+                        new SslServerAuthenticationOptions()
+                        {
+                            // AllowRenegotiation is still true by default up to .NET 6.0.
+                            AllowRenegotiation = false,
+                            ServerCertificate = certificate,
+                            EnabledSslProtocols = Constants.sslProtocols
+                        },
+                        cancellationToken);
+                }
+                catch
+                {
+                    await sslStream.DisposeAsync();
+                    throw;
+                }
+
+                return sslStream;
             }
 
-            return sslStream;
+            return null;
         }
-
-        return null;
     }
 
     public void Dispose()

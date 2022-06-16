@@ -8,6 +8,8 @@ internal class CertificateUtils
 {
     private static readonly Regex filterRegex = new("[^0-9a-fA-F]+");
 
+    private static readonly StoreLocation[] storeLocations = new[] { StoreLocation.CurrentUser, StoreLocation.LocalMachine };
+
     /// <summary>
     /// Returns the X509 certificate with the given fingerprint from the current user's or
     /// the local machine's "My" certificate store, or null if such a certificate was not found.
@@ -25,26 +27,23 @@ internal class CertificateUtils
         // filter non-hex characters
         certFingerprint = filterRegex.Replace(certFingerprint, "");
 
-        var locations = new[] { StoreLocation.CurrentUser, StoreLocation.LocalMachine };
 
-        foreach (var location in locations)
+        foreach (var location in storeLocations)
         {
-            using (var store = new X509Store(StoreName.My, location))
+            using var store = new X509Store(StoreName.My, location);
+            store.Open(OpenFlags.ReadOnly);
+
+            // TODO: Dispose the other certificates.
+            var result = store.Certificates.Find(X509FindType.FindByThumbprint, certFingerprint, false);
+
+            if (result.Count is not 0)
             {
-                store.Open(OpenFlags.ReadOnly);
+                var resultCertificate = result[0];
 
-                // TODO: Dispose the other certificates.
-                var result = store.Certificates.Find(X509FindType.FindByThumbprint, certFingerprint, false);
+                if (!resultCertificate.HasPrivateKey)
+                    throw new System.Exception("Certificate doesn't have a private key.");
 
-                if (result.Count is not 0)
-                {
-                    var resultCertificate = result[0];
-
-                    if (!resultCertificate.HasPrivateKey)
-                        throw new System.Exception("Certificate doesn't have a private key.");
-
-                    return resultCertificate;
-                }
+                return resultCertificate;
             }
         }
 

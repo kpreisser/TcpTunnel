@@ -1,5 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Net;
+using System.Security.Cryptography.X509Certificates;
 
 using TcpTunnel.Gateway;
 
@@ -12,9 +14,12 @@ namespace TestGateway
             static void LogConsole(string s) => Console.WriteLine(s);
 
             int port = 23654;
+
             var server = new Gateway(
-                port,
-                null,
+                new List<(IPAddress? ip, int port, X509Certificate2? certificate)>()
+                {
+                    (null, port, null)
+                },
                 new Dictionary<int, (string proxyClientPassword, string proxyServerPassword)>() { 
                     { 15, ( "testClientPasswort", "testServerPassword") } 
                 },

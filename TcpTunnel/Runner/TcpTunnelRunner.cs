@@ -60,18 +60,29 @@ namespace TcpTunnel.Runner
 
                     if (string.Equals(applicationType, "gateway", StringComparison.OrdinalIgnoreCase))
                     {
-                        ushort port = ushort.Parse(
-                            instanceElement.Attribute("port")?.Value ??
-                                throw new InvalidDataException("Missing attribute 'port'."),
-                            CultureInfo.InvariantCulture);
+                        var listenerEntries = new List<(IPAddress? address, int port, X509Certificate2? certificate)>();
 
-                        string? certificateThumbprint = instanceElement.Attribute("certificateHash")?.Value;
-                        var certificate = default(X509Certificate2);
-
-                        if (!string.IsNullOrEmpty(certificateThumbprint))
+                        foreach (var listenerElement in instanceElement.Elements(xmlNamespace + "Listener"))
                         {
-                            certificate = CertificateUtils.GetCurrentUserOrLocalMachineCertificateFromFingerprint(
-                                certificateThumbprint);
+                            var ip = listenerElement.Attribute("ip")?.Value is { } ipString ?
+                                IPAddress.Parse(ipString) :
+                                null;
+
+                            ushort port = ushort.Parse(
+                                listenerElement.Attribute("port")?.Value ??
+                                    throw new InvalidDataException("Missing attribute 'port'."),
+                                CultureInfo.InvariantCulture);
+
+                            string? certificateThumbprint = listenerElement.Attribute("certificateHash")?.Value;
+                            var certificate = default(X509Certificate2);
+
+                            if (!string.IsNullOrEmpty(certificateThumbprint))
+                            {
+                                certificate = CertificateUtils.GetCurrentUserOrLocalMachineCertificateFromFingerprint(
+                                    certificateThumbprint);
+                            }
+
+                            listenerEntries.Add((ip, port, certificate));
                         }
 
                         var sessions = new Dictionary<int, (
@@ -97,7 +108,7 @@ namespace TcpTunnel.Runner
                                     $"Duplicate session ID \"{sessionId.ToString(CultureInfo.InvariantCulture)}\".");
                         }
 
-                        var server = new Gateway.Gateway(port, certificate, sessions, this.logger);
+                        var server = new Gateway.Gateway(listenerEntries, sessions, this.logger);
                         server.Start();
 
                         this.instances.Add(server);
