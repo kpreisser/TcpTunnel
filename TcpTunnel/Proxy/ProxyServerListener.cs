@@ -111,8 +111,8 @@ internal class ProxyServerListener
 
                 // It is another error, so ignore it. This can happen when the
                 // client closes the connection immediately after it was accepted,
-                // and we are currently not yet waiting in AcceptTcpClientAsync()
-                // (due to processing a previous socket).
+                // and we weren't waiting in AcceptTcpClientAsync() yet (due to
+                // processing a previous socket).
                 continue;
             }
 
