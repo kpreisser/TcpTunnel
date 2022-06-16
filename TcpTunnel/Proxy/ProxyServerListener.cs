@@ -109,10 +109,8 @@ internal class ProxyServerListener
                 if (Volatile.Read(ref this.stopped))
                     break;
 
-                // It is another error, so ignore it. This can happen when the
-                // client closes the connection immediately after it was accepted,
-                // and we weren't waiting in AcceptTcpClientAsync() yet (due to
-                // processing a previous socket).
+                // It is another error, so try again. This can happen when the
+                // connection was reset while it was in the backlog.
                 continue;
             }
 
