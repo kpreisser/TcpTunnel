@@ -97,11 +97,11 @@ internal class ProxyTunnelConnection
         // available window size.
         lock (this.syncRoot)
         {
-            if (!this.transmitTaskStopped)
-            {
-                this.transmitPacketQueue.Enqueue(packet);
-                this.transmitPacketQueueSemaphore.Release();
-            }
+            if (this.transmitTaskStopped)
+                return;
+            
+            this.transmitPacketQueue.Enqueue(packet);
+            this.transmitPacketQueueSemaphore.Release();
         }
     }
 
@@ -112,33 +112,33 @@ internal class ProxyTunnelConnection
 
         lock (this.syncRoot)
         {
-            if (!this.receiveTaskStopped)
+            if (this.receiveTaskStopped)
+                return;
+
+            int window = 0;
+
+            while (this.receiveWindowQueueSemaphore.Wait(0))
             {
-                int window = 0;
-
-                while (this.receiveWindowQueueSemaphore.Wait(0))
-                {
-                    if (!this.receiveWindowQueue.TryDequeue(out int entry))
-                        throw new InvalidOperationException();
-
-                    checked
-                    {
-                        window += entry;
-                    }
-                }
+                if (!this.receiveWindowQueue.TryDequeue(out int entry))
+                    throw new InvalidOperationException();
 
                 checked
                 {
-                    window += newWindow;
+                    window += entry;
                 }
-
-                // The new window size must not be greater than the initial window size.
-                if (window > Constants.InitialWindowSize)
-                    throw new InvalidOperationException();
-
-                this.receiveWindowQueue.Enqueue(window);
-                this.receiveWindowQueueSemaphore.Release();
             }
+
+            checked
+            {
+                window += newWindow;
+            }
+
+            // The new window size must not be greater than the initial window size.
+            if (window > Constants.InitialWindowSize)
+                throw new InvalidOperationException();
+
+            this.receiveWindowQueue.Enqueue(window);
+            this.receiveWindowQueueSemaphore.Release();
         }
     }
 
