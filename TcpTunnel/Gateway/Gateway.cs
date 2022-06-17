@@ -139,7 +139,7 @@ public class Gateway : IInstance
         bool isStopped = false;
         var streamModifier = ModifyStreamAsync;
 
-        var activeHandlers = new Dictionary<GatewayConnectionHandler, (Task task, bool canCancelEndpoint)>();
+        var activeHandlers = new Dictionary<GatewayProxyConnectionHandler, (Task task, bool canCancelEndpoint)>();
 
         try
         {
@@ -168,7 +168,7 @@ public class Gateway : IInstance
                 var remoteEndpoint = client.Client.RemoteEndPoint!;
                 this.logger?.Invoke($"Accepted connection from '{remoteEndpoint}'.");
 
-                var handler = default(GatewayConnectionHandler);
+                var handler = default(GatewayProxyConnectionHandler);
                 var endpoint = new TcpClientFramingEndpoint(
                     client,
                     useSendQueue: true,
@@ -200,7 +200,7 @@ public class Gateway : IInstance
                     },
                     streamModifier: streamModifier);
 
-                handler = new GatewayConnectionHandler(this, endpoint, remoteEndpoint);
+                handler = new GatewayProxyConnectionHandler(this, endpoint, remoteEndpoint);
 
                 lock (activeHandlers)
                 {

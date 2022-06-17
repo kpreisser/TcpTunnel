@@ -35,7 +35,7 @@ namespace TcpTunnel.Gateway;
  * 
  * 0xFF: Reserved for Ping.
  */
-internal class GatewayConnectionHandler
+internal class GatewayProxyConnectionHandler
 {
     private readonly Gateway gateway;
     private readonly TcpClientFramingEndpoint endpoint;
@@ -46,7 +46,7 @@ internal class GatewayConnectionHandler
 
     private int sessionIterationsToAcknowledge;
 
-    public GatewayConnectionHandler(
+    public GatewayProxyConnectionHandler(
         Gateway gateway,
         TcpClientFramingEndpoint endpoint,
         SystemNetEndpoint clientEndpoint)
