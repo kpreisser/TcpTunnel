@@ -7,31 +7,50 @@ namespace TcpTunnel.Utils;
 
 internal static class StreamExtensions
 {
-    // TODO: For .NET 7.0, use Stream.ReadAtLeastAsync() instead.
+    // TODO: For .NET 7.0, remove this class as these methods are built-in.
     // See: https://github.com/dotnet/runtime/issues/16598
-    public static async ValueTask<bool> ReadCompleteAsync(
+    public static ValueTask<int> ReadAtLeastAsync(
             this Stream stream,
             Memory<byte> buffer,
-            bool allowEndOfStream = false,
+            int minimumBytes,
+            bool throwOnEndOfStrem = true,
             CancellationToken cancellationToken = default)
     {
-        bool firstIteration = true;
+        if (minimumBytes < 0 || minimumBytes > buffer.Length)
+            throw new ArgumentException();
 
-        do
+        return ReadAtLeastAsyncCore();
+
+        async ValueTask<int> ReadAtLeastAsyncCore()
         {
-            int read = await stream.ReadAsync(buffer, cancellationToken)
-                .ConfigureAwait(false);
+            int bytesRead = 0;
+            while (bytesRead < minimumBytes)
+            {
+                int read = await stream.ReadAsync(buffer[bytesRead..], cancellationToken)
+                    .ConfigureAwait(false);
 
-            if (read is 0 && buffer.Length > 0 && allowEndOfStream && firstIteration)
-                return false;
-            else if (read is 0 && buffer.Length > 0)
-                throw new EndOfStreamException();
+                if (read is 0)
+                {
+                    if (throwOnEndOfStrem)
+                        throw new EndOfStreamException();
 
-            firstIteration = false;
-            buffer = buffer[read..];
+                    return bytesRead;
+                }
+
+                bytesRead += read;
+            }
+
+            return bytesRead;
         }
-        while (buffer.Length > 0);
+    }
 
-        return true;
+    public static ValueTask ReadExactlyAsync(
+           this Stream stream,
+           Memory<byte> buffer,
+           CancellationToken cancellationToken = default)
+    {
+        return new ValueTask(
+            ReadAtLeastAsync(stream, buffer, buffer.Length, throwOnEndOfStrem: true, cancellationToken)
+            .AsTask());
     }
 }

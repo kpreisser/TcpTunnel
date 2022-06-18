@@ -28,7 +28,10 @@ namespace TcpTunnel.Proxy;
  */
 public class Proxy : IInstance
 {
-    public const int MaxReceivePacketSize = 2 * 1024 * 1024;
+    // The max message size is defined by the receive buffer size (32 KiB) plus
+    // the additional data, which are just a few bytes. Therefore, 512 KiB should
+    // be more than enough.
+    public const int MaxReceiveMessageSize = 512 * 1024;
 
     private readonly object syncRoot = new();
 
@@ -270,7 +273,7 @@ public class Proxy : IInstance
 
             while (true)
             {
-                var packet = await endpoint.ReceiveMessageAsync(MaxReceivePacketSize);
+                var packet = await endpoint.ReceiveMessageAsync(MaxReceiveMessageSize);
                 if (packet is null)
                     return;
 
@@ -387,7 +390,19 @@ public class Proxy : IInstance
                                 var newPacket = new byte[packetBuffer.Length - 1];
                                 packetBuffer[1..].CopyTo(newPacket);
 
-                                connection.EnqueuePacket(newPacket);
+                                try
+                                {
+                                    connection.EnqueueTransmitData(newPacket);
+                                }
+                                catch (InvalidOperationException)
+                                {
+                                    // The data to be queued would exceed the initial window
+                                    // size, which cannot happen if the partner proxy works
+                                    // correctly. Therefore, abort the connection.
+                                    // By waiting for StopAsync(), we ensure that we don't
+                                    // process any further commands for that connection.
+                                    await connection.StopAsync();
+                                }
                             }
                             else if (packetBuffer.Length >= 1 &&
                                 packetBuffer.Span[0] is 0x02)

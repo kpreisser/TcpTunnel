@@ -83,7 +83,7 @@ internal class TcpClientEndpoint : Endpoint
 
             this.currentReadBufferFromPool = ArrayPool<byte>.Shared.Rent(maxReceiveCount);
 
-            int count = await this.stream!.ReadAsync(
+            int count = await this.stream.ReadAsync(
                     this.currentReadBufferFromPool.AsMemory()
                         [..(maxLength is -1 ? this.currentReadBufferFromPool.Length : maxReceiveCount)],
                     this.CancellationToken)

@@ -20,8 +20,10 @@ namespace TcpTunnel.Gateway;
 
 public class Gateway : IInstance
 {
-    public const int MaxReceivePacketSize = 2 * 1024 * 1024;
-    public const int MaxSendBufferSize = 5 * 1024 * 1024;
+    // The max message size is defined by the receive buffer size (32 KiB) plus
+    // the additional data, which are just a few bytes. Therefore, 512 KiB should
+    // be more than enough.
+    public const int MaxReceiveMessageSize = 512 * 1024;
 
     private readonly IReadOnlyList<(IPAddress? ip, int port, X509Certificate2? certificate)> listenEntries;
 

@@ -9,7 +9,7 @@ using TcpTunnel.Utils;
 namespace TcpTunnel.Networking;
 
 /// <summary>
-/// Abstraction layer for a socket-like connection. This can be an Websocket or a
+/// Abstraction layer for a socket-like connection. This can be an WebSocket or a
 /// TCP socket.
 /// </summary>
 /// <remarks>
@@ -100,7 +100,7 @@ internal abstract partial class Endpoint
     #region ---------- Public methods ----------
 
     /// <summary>
-    /// Cancels pending I/O operations.
+    /// Cancels pending I/O operations, which will abort the current connection.
     /// </summary>
     public virtual void Cancel()
     {

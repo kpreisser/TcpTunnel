@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Buffers;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
@@ -21,8 +22,8 @@ internal class ProxyTunnelConnection
 
     private readonly object syncRoot = new();
     private readonly CancellationTokenSource cts;
-    private readonly ConcurrentQueue<Memory<byte>> transmitPacketQueue;
-    private readonly SemaphoreSlim transmitPacketQueueSemaphore;
+    private readonly ConcurrentQueue<ReadOnlyMemory<byte>> transmitDataQueue;
+    private readonly SemaphoreSlim transmitDataQueueSemaphore;
 
     /// <summary>
     /// A queue which contains at most 2 entries. The sum of all entries is
@@ -32,6 +33,9 @@ internal class ProxyTunnelConnection
     /// </summary>
     private readonly ConcurrentQueue<int> receiveWindowQueue;
     private readonly SemaphoreSlim receiveWindowQueueSemaphore;
+
+    // The window that is currently available for enqueuing transmit data.
+    private int transmitWindowAvailable = Constants.InitialWindowSize;
 
     private Task? receiveTask;
     private bool receiveTaskStopped;
@@ -52,8 +56,8 @@ internal class ProxyTunnelConnection
         this.connectionFinishedHandler = connectionFinishedHandler;
 
         this.cts = new();
-        this.transmitPacketQueue = new();
-        this.transmitPacketQueueSemaphore = new(0);
+        this.transmitDataQueue = new();
+        this.transmitDataQueueSemaphore = new(0);
         this.receiveWindowQueue = new();
         this.receiveWindowQueueSemaphore = new(0);
     }
@@ -89,19 +93,30 @@ internal class ProxyTunnelConnection
         await this.receiveTask;
     }
 
-    public void EnqueuePacket(Memory<byte> packet)
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="data"></param>
+    /// <exception cref="InvalidOperationException">
+    /// The queued data's length would exceed the initial window size.
+    /// </exception>
+    public void EnqueueTransmitData(ReadOnlyMemory<byte> data)
     {
-        // Packet's length can be 0 to shutdown the connection after sending all
+        // data's length can be 0 to shutdown the connection after sending all
         // enqueued packets.
-        // TODO: Check if the data amount is valid according to the currently
-        // available window size.
         lock (this.syncRoot)
         {
             if (this.transmitTaskStopped)
                 return;
-            
-            this.transmitPacketQueue.Enqueue(packet);
-            this.transmitPacketQueueSemaphore.Release();
+
+            // Verify that the data to be queued doesn't exceed the available
+            // transmit window. Otherwise, the partner proxy would be malicious.
+            if (data.Length > this.transmitWindowAvailable)
+                throw new InvalidOperationException();
+
+            this.transmitWindowAvailable -= data.Length;
+            this.transmitDataQueue.Enqueue(data);
+            this.transmitDataQueueSemaphore.Release();
         }
     }
 
@@ -285,7 +300,7 @@ internal class ProxyTunnelConnection
                 }
 
                 await (remoteClientStream?.DisposeAsync() ?? default);
-                this.transmitPacketQueueSemaphore.Dispose();
+                this.transmitDataQueueSemaphore.Dispose();
             }
         }
         finally
@@ -329,11 +344,11 @@ internal class ProxyTunnelConnection
 
             while (true)
             {
-                await this.transmitPacketQueueSemaphore.WaitAsync(this.cts.Token);
-                if (!this.transmitPacketQueue.TryDequeue(out var packet))
+                await this.transmitDataQueueSemaphore.WaitAsync(this.cts.Token);
+                if (!this.transmitDataQueue.TryDequeue(out var data))
                     throw new InvalidOperationException();
 
-                if (packet.Length is 0)
+                if (data.Length is 0)
                 {
                     // Close the connection and return.
                     this.remoteClient.Client.Shutdown(SocketShutdown.Send);
@@ -341,20 +356,20 @@ internal class ProxyTunnelConnection
                 }
 
                 // Send the packet.
-                await remoteClientStream.WriteAsync(packet, this.cts.Token);
+                await remoteClientStream.WriteAsync(data, this.cts.Token);
                 await remoteClientStream.FlushAsync(this.cts.Token);
 
                 // Update the transmit window.
                 checked
                 {
-                    availableWindow += packet.Length;
+                    availableWindow += data.Length;
                 }
 
                 // Only raise the window update event if we reached the threshold,
                 // to avoid flooding the connection with small window updates.
                 if (availableWindow >= Constants.WindowThreshold)
                 {
-                    this.transmitWindowUpdateHandler?.Invoke(availableWindow);
+                    this.UpdateTransmitWindow(availableWindow);
                     availableWindow = 0;
                 }
             }
@@ -379,5 +394,14 @@ internal class ProxyTunnelConnection
                 this.transmitTaskStopped = true;
             }
         }
+    }
+
+    private void UpdateTransmitWindow(int availableWindow)
+    {
+        // Need to increment the available window before calling the handler.
+        lock (this.syncRoot)
+            this.transmitWindowAvailable += availableWindow;
+
+        this.transmitWindowUpdateHandler?.Invoke(availableWindow);
     }
 }

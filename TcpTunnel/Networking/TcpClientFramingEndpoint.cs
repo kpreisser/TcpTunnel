@@ -40,15 +40,20 @@ internal class TcpClientFramingEndpoint : TcpClientEndpoint
                 .ConfigureAwait(false);
 
             int payloadLength;
-            int lengthSize = 4;
+            const int lengthSize = 4;
             var lengthBuf = ArrayPool<byte>.Shared.Rent(lengthSize);
             try
             {
-                if (!await this.Stream.ReadCompleteAsync(
+                int readCount = await this.Stream.ReadAtLeastAsync(
                     lengthBuf.AsMemory()[..lengthSize],
-                    allowEndOfStream: true,
-                    this.CancellationToken))
+                    lengthSize,
+                    throwOnEndOfStrem: false,
+                    this.CancellationToken);
+
+                if (readCount is 0)
                     return null;
+                else if (readCount < lengthSize)
+                    throw new EndOfStreamException();
 
                 payloadLength = BinaryPrimitives.ReadInt32BigEndian(lengthBuf);
             }
@@ -61,15 +66,14 @@ internal class TcpClientFramingEndpoint : TcpClientEndpoint
                 throw new InvalidDataException("Invalid frame length: " + payloadLength);
 
             // Wait until data is available.
-            await this.Stream!.ReadAsync(Memory<byte>.Empty, this.CancellationToken)
+            await this.Stream.ReadAsync(Memory<byte>.Empty, this.CancellationToken)
                 .ConfigureAwait(false);
 
             // Get a receive buffer from the pool.
             this.currentReadBufferFromPool = ArrayPool<byte>.Shared.Rent(payloadLength);
 
-            await this.Stream!.ReadCompleteAsync(
+            await this.Stream.ReadExactlyAsync(
                     this.currentReadBufferFromPool.AsMemory()[..payloadLength],
-                    allowEndOfStream: false,
                     this.CancellationToken)
                     .ConfigureAwait(false);
 

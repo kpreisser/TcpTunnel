@@ -67,7 +67,7 @@ internal class GatewayProxyConnectionHandler
         {
             while (true)
             {
-                var packet = await this.endpoint.ReceiveMessageAsync(Gateway.MaxReceivePacketSize);
+                var packet = await this.endpoint.ReceiveMessageAsync(Gateway.MaxReceiveMessageSize);
                 if (packet is null)
                     return;
 
