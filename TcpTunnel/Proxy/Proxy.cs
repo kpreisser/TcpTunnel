@@ -279,7 +279,14 @@ public class Proxy : IInstance
 
                 var packetBuffer = packet.Value.Buffer;
 
-                if (packetBuffer.Length >= 2 + (isProxyClient ? sizeof(long) : 0) && 
+                if (packetBuffer.Length >= 2 && packetBuffer.Span[0] is 0x01) {
+                    bool authenticationSucceeded = packetBuffer.Span[1] is 0x01;
+
+                    this.logger?.Invoke(
+                        $"Authentication: " +
+                        $"{(authenticationSucceeded ? "Succeeded" : "Failed")}.");
+                }
+                else if (packetBuffer.Length >= 2 + (isProxyClient ? sizeof(long) : 0) && 
                     packetBuffer.Span[0] is 0x02)
                 {
                     // New Session Status.

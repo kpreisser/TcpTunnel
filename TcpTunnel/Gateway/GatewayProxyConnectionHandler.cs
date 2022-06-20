@@ -24,7 +24,9 @@ namespace TcpTunnel.Gateway;
  * 
  * PROTOCOL (Frame Payload) GATEWAY COMMUNICATION:
  * 0x00: (Proxy to Gateway) Authentication + Proxy-Type (0x01 for proxy-server) + Login-Prerequisite-String + Session-ID (int) + Session-Password
- * 0x01: (Gateway to Proxy) Authentication failed, try again.
+ * 0x01: (Gateway to Proxy) Authentication Result.
+ *     - 0x00: Auth failed.
+ *     - 0x01: Auth successful.
  * 0x02: (Gateway to Proxy) Session Status (sent after successfull authentication if partner proxies are available, and during runtime if status changes):
  *     + [if proxy is proxy-client) Partner Proxy ID (Int64)
  *     + 0x01: Partner proxy is available (in case of proxy-server, this means the proxy needs to acknowledge the new session iteration) or 0x00: Partner proxy is unavailable.
@@ -190,6 +192,10 @@ internal class GatewayProxyConnectionHandler
                                         Debug.Assert(
                                             isProxyClient || this.proxyId is not Constants.ProxyClientId);
 
+                                        // Notify the proxy that the authentication succeeded.
+                                        var response = new byte[] { 0x01, 0x01 };
+                                        this.endpoint.SendMessageByQueue(response);
+
                                         // Check if an old proxy-client is present.
                                         // TODO: What should happen with that connection?
                                         // Currently we just de-authenticate it without
@@ -213,7 +219,8 @@ internal class GatewayProxyConnectionHandler
 
                             if (!couldAuthenticate)
                             {
-                                var response = new byte[] { 0x01 };
+                                // Notify the proxy that the authentication failed.
+                                var response = new byte[] { 0x01, 0x00 };
                                 this.endpoint.SendMessageByQueue(response);
                             }
                         }
