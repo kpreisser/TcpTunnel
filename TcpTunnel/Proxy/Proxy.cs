@@ -188,7 +188,7 @@ public class Proxy : IInstance
                         this.logger?.Invoke($"Connection to gateway closed. Reconnecting...");
                 }
             }
-            catch (Exception ex) when (ex.CanCatch())
+            catch
             {
                 // Ingore, and try again.
             }
@@ -611,7 +611,7 @@ public class Proxy : IInstance
                     client.Client.Close(0);
                     client.Dispose();
                 }
-                catch (Exception ex) when (ex.CanCatch())
+                catch
                 {
                     // Ignore.
                 }

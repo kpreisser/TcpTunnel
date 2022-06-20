@@ -94,9 +94,9 @@ public class Gateway : IInstance
                 {
                     listener?.Stop();
                 }
-                catch (Exception ex) when (ex.CanCatch())
+                catch
                 {
-                    // Ignore
+                    // Ignore.
                 }
 
                 // Stop the previously started listeners, then rethrow the exception.
@@ -124,9 +124,9 @@ public class Gateway : IInstance
             {
                 listener.Stop();
             }
-            catch (Exception ex) when (ex.CanCatch())
+            catch
             {
-                // Ignore
+                // Ignore.
             }
 
             // Wait for the listener task to finish.
@@ -152,7 +152,7 @@ public class Gateway : IInstance
                 {
                     client = await listener.AcceptTcpClientAsync();
                 }
-                catch (Exception ex) when (ex.CanCatch())
+                catch
                 {
                     // Check if the error occured because we need to stop.
                     if (Volatile.Read(ref this.stopped))
@@ -213,7 +213,7 @@ public class Gateway : IInstance
                         {
                             await endpoint.RunEndpointAsync(handler.RunAsync);
                         }
-                        catch (Exception ex) when (ex.CanCatch())
+                        catch
                         {
                             // Ignore.
                         }
@@ -223,9 +223,9 @@ public class Gateway : IInstance
                             {
                                 client.Dispose();
                             }
-                            catch (Exception ex) when (ex.CanCatch())
+                            catch
                             {
-                                // Ignore
+                                // Ignore.
                             }
 
                             lock (activeHandlers)

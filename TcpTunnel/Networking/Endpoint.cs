@@ -313,9 +313,9 @@ internal abstract partial class Endpoint
                 bool normalClose = isNormalClose && !this.CancellationToken.IsCancellationRequested;
                 await this.CloseCoreAsync(normalClose).ConfigureAwait(false);
             }
-            catch (Exception ex) when (ex.CanCatch())
+            catch
             {
-                // Ignore
+                // Ignore.
             }
 
             await this.HandleCloseAsync().ConfigureAwait(false);
@@ -500,9 +500,9 @@ internal abstract partial class Endpoint
                         {
                             await this.CloseCoreAsync(true).ConfigureAwait(false);
                         }
-                        catch (Exception ex) when (ex.CanCatch())
+                        catch
                         {
-                            // Ignore
+                            // Ignore.
                         }
 
                         isFaulted = true;
@@ -516,7 +516,7 @@ internal abstract partial class Endpoint
                             await this.SendMessageCoreAsync(el.Message.Value, el.IsTextMessage)
                                     .ConfigureAwait(false);
                         }
-                        catch (Exception ex) when (ex.CanCatch())
+                        catch
                         {
                             // The connection is probably already closed/aborted.
                             // Note: Don't return here as that will dispose the

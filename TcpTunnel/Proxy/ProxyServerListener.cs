@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
@@ -46,21 +47,27 @@ internal class ProxyServerListener
 
                 listener.Start();
             }
-            catch
+            catch (Exception ex)
             {
                 // Stop() will dispose the underlying socket.
                 try
                 {
                     listener?.Stop();
                 }
-                catch (Exception ex) when (ex.CanCatch())
+                catch
                 {
-                    // Ignore
+                    // Ignore.
                 }
 
                 // Stop the previously started listeners, then rethrow the exception.
                 this.Stop();
-                throw;
+
+                string hostPort = (descriptor.ListenIP?.ToString() ?? "<any>") + ":" +
+                    descriptor.ListenPort.ToString(CultureInfo.InvariantCulture);
+
+                throw new InvalidOperationException(
+                    $"Could not listen on '{hostPort}': {ex.Message}",
+                    ex);
             }
 
             var listenerTask = ExceptionUtils.StartTask(
@@ -80,9 +87,9 @@ internal class ProxyServerListener
             {
                 listener.Stop();
             }
-            catch (Exception ex) when (ex.CanCatch())
+            catch
             {
-                // Ignore
+                // Ignore.
             }
 
             // Wait for the listener task to finish.
@@ -103,7 +110,7 @@ internal class ProxyServerListener
             {
                 client = await listener.AcceptTcpClientAsync();
             }
-            catch (Exception ex) when (ex.CanCatch())
+            catch
             {
                 // Check if the error occured because we need to stop.
                 if (Volatile.Read(ref this.stopped))

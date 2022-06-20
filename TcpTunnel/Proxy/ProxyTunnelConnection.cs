@@ -261,7 +261,7 @@ internal class ProxyTunnelConnection
                     }
                 }
             }
-            catch (Exception ex) when (ex.CanCatch())
+            catch
             {
                 // Ensure that a thread switch happens in case the current continuation is
                 // called inline from CancellationTokenSource.Cancel(), which could lead to
@@ -318,7 +318,7 @@ internal class ProxyTunnelConnection
 
                 this.remoteClient.Dispose();
             }
-            catch (Exception ex) when (ex.CanCatch())
+            catch
             {
                 // Ignore
             }
@@ -374,7 +374,7 @@ internal class ProxyTunnelConnection
                 }
             }
         }
-        catch (Exception ex) when (ex.CanCatch())
+        catch
         {
             // Ensure that a thread switch happens in case the current continuation is
             // called inline from CancellationTokenSource.Cancel(), in which case we
