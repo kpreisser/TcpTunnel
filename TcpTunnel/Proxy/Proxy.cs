@@ -185,7 +185,7 @@ public class Proxy : IInstance
                     client.Dispose();
 
                     if (wasConnected)
-                        this.logger?.Invoke($"Connection to gateway closed. Reconnecting...");
+                        this.logger?.Invoke($"Connection to gateway lost. Reconnecting...");
                 }
             }
             catch
