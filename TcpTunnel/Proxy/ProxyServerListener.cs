@@ -35,7 +35,7 @@ internal class ProxyServerListener
 
     public void Start()
     {
-        this.listenersCts = new CancellationTokenSource();
+        this.listenersCts = new();
         try
         {
             // Create the listeners.
