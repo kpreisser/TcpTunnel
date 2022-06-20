@@ -31,7 +31,7 @@ public class Gateway : IInstance
 
     private readonly Action<string>? logger;
 
-    private bool stopped;
+    private CancellationTokenSource? listenersCts;
 
     public Gateway(
         IReadOnlyList<(IPAddress? ip, int port, X509Certificate2? certificate)> listenEntries,
@@ -73,70 +73,94 @@ public class Gateway : IInstance
 
     public void Start()
     {
-        Volatile.Write(ref this.stopped, false);
-
-        foreach (var (ip, port, certificate) in this.listenEntries)
+        this.listenersCts = new CancellationTokenSource();
+        try
         {
-            var listener = default(TcpListener);
-            try
+            // Create the listeners.
+            foreach (var (ip, port, certificate) in this.listenEntries)
             {
-                if (ip is null)
-                    listener = TcpListener.Create(port);
-                else
-                    listener = new TcpListener(ip, port);
-
-                listener.Start();
-            }
-            catch
-            {
-                // Stop() will dispose the underlying socket.
+                var listener = default(TcpListener);
                 try
                 {
-                    listener?.Stop();
+                    if (ip is null)
+                        listener = TcpListener.Create(port);
+                    else
+                        listener = new TcpListener(ip, port);
+
+                    listener.Start();
                 }
                 catch
                 {
-                    // Ignore.
+                    // Stop() will dispose the underlying socket.
+                    try
+                    {
+                        listener?.Stop();
+                    }
+                    catch
+                    {
+                        // Ignore.
+                    }
+
+                    // Stop the previously started listeners, then rethrow the exception.
+                    this.Stop();
+                    throw;
                 }
 
-                // Stop the previously started listeners, then rethrow the exception.
-                this.Stop();
-                throw;
+                this.logger?.Invoke(
+                    $"Gateway listener started on '{ip?.ToString() ?? "<any>"}:{port.ToString(CultureInfo.InvariantCulture)}'.");
+
+                var listenerTask = ExceptionUtils.StartTask(
+                    () => this.RunListenerTask(listener, certificate, this.listenersCts.Token));
+
+                this.activeListeners.Add((listener, listenerTask));
             }
+        }
+        catch
+        {
+            // The CTS may already have been disposed (and cleared out) by Stop().
+            this.listenersCts?.Dispose();
+            this.listenersCts = null;
 
-            this.logger?.Invoke(
-                $"Gateway listener started on '{ip?.ToString() ?? "<any>"}:{port.ToString(CultureInfo.InvariantCulture)}'.");
-
-            var listenerTask = ExceptionUtils.StartTask(
-                () => this.RunListenerTask(listener, certificate));
-
-            this.activeListeners.Add((listener, listenerTask));
+            throw;
         }
     }
 
     public void Stop()
     {
-        Volatile.Write(ref this.stopped, true);
+        if (this.listenersCts is null)
+            return;
 
-        foreach (var (listener, listenerTask) in this.activeListeners)
+        try
         {
-            try
-            {
-                listener.Stop();
-            }
-            catch
-            {
-                // Ignore.
-            }
+            this.listenersCts.Cancel();
+        }
+        catch (AggregateException)
+        {
+            // Ignore.
+            // This can occur with some implementations, e.g. registered callbacks
+            // from  WebSocket operations using HTTP.sys (from ASP.NET Core) can
+            // throw here when calling Cancel() and the IWebHost has already been
+            // disposed.
+        }
 
+        foreach (var (listener, task) in this.activeListeners)
+        {
             // Wait for the listener task to finish.
-            listenerTask.GetAwaiter().GetResult();
+            task.GetAwaiter().GetResult();
+           
+            // Dispose of the TcpListener.
+            listener.Stop();
         }
 
         this.activeListeners.Clear();
+        this.listenersCts.Dispose();
+        this.listenersCts = null;
     }
 
-    private async Task RunListenerTask(TcpListener listener, X509Certificate2? certificate)
+    private async Task RunListenerTask(
+        TcpListener listener,
+        X509Certificate2? certificate,
+        CancellationToken cancellationToken)
     {
         bool isStopped = false;
         var streamModifier = ModifyStreamAsync;
@@ -150,17 +174,18 @@ public class Gateway : IInstance
                 TcpClient client;
                 try
                 {
-                    client = await listener.AcceptTcpClientAsync();
+                    client = await listener.AcceptTcpClientAsync(cancellationToken);
                 }
-                catch
+                catch (SocketException)
                 {
-                    // Check if the error occured because we need to stop.
-                    if (Volatile.Read(ref this.stopped))
-                        break;
-
-                    // It is another error, so try again. This can happen when the
-                    // connection was reset while it was in the backlog.
+                    // This can happen when the connection got reset while it
+                    // was in the backlog. In that case, just try again.
                     continue;
+                }
+                catch (OperationCanceledException)
+                {
+                    // The CTS was cancelled.
+                    break;
                 }
 
                 // After the socket is connected, configure it to disable the Nagle
