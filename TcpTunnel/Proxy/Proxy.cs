@@ -79,6 +79,53 @@ public class Proxy : IInstance
         this.logger = logger;
     }
 
+    private static (byte[] messageToSend, Memory<byte> coreMessage) PreparePartnerProxyMessage(
+        int length,
+        long? remoteProxyId)
+    {
+        var message = new byte[1 + (remoteProxyId is not null ? sizeof(long) : 0) + length];
+
+        int pos = 0;
+        message[pos++] = Constants.TypeProxyToProxyCommunication;
+
+        if (remoteProxyId is not null)
+        {
+            BinaryPrimitives.WriteInt64BigEndian(message.AsSpan()[pos..], remoteProxyId.Value);
+            pos += sizeof(long);
+        }
+
+        var coreMessage = message.AsMemory()[pos..][..length];
+        return (message, coreMessage);
+    }
+
+    private static bool TryDecodePartnerProxyMessage(
+        Memory<byte> message,
+        bool containsPartnerProxyId,
+        out Memory<byte> coreMessage,
+        out long? partnerProxyId)
+    {
+        if (!(message.Length > 0 && message.Span[0] is Constants.TypeProxyToProxyCommunication))
+        {
+            coreMessage = default;
+            partnerProxyId = null;
+            return false;
+        }
+
+        coreMessage = message[1..];
+        partnerProxyId = null;
+
+        if (containsPartnerProxyId)
+        {
+            if (coreMessage.Length < sizeof(long))
+                throw new InvalidDataException();
+
+            partnerProxyId = BinaryPrimitives.ReadInt64BigEndian(coreMessage.Span);
+            coreMessage = coreMessage[sizeof(long)..];
+        }
+
+        return true;
+    }
+
     public void Start()
     {
         if (this.proxyServerConnectionDescriptors is not null)
@@ -279,14 +326,15 @@ public class Proxy : IInstance
 
                 var packetBuffer = packet.Value.Buffer;
 
-                if (packetBuffer.Length >= 2 && packetBuffer.Span[0] is 0x01) {
+                if (packetBuffer.Length >= 2 && packetBuffer.Span[0] is 0x01)
+                {
                     bool authenticationSucceeded = packetBuffer.Span[1] is 0x01;
 
                     this.logger?.Invoke(
                         $"Authentication: " +
                         $"{(authenticationSucceeded ? "Succeeded" : "Failed")}.");
                 }
-                else if (packetBuffer.Length >= 2 + (isProxyClient ? sizeof(long) : 0) && 
+                else if (packetBuffer.Length >= 2 + (isProxyClient ? sizeof(long) : 0) &&
                     packetBuffer.Span[0] is 0x02)
                 {
                     // New Session Status.
@@ -315,21 +363,17 @@ public class Proxy : IInstance
                     if (partnerProxyAvailable)
                         this.HandlePartnerProxyAvailable(endpoint, partnerProxyId ?? Constants.ProxyClientId);
                 }
-                else if (packetBuffer.Length >= 1 + (isProxyClient ? sizeof(long) : 0) + sizeof(long) &&
-                    packetBuffer.Span[0] is Constants.TypeProxyToProxyCommunication)
+                else if (TryDecodePartnerProxyMessage(
+                    packetBuffer,
+                    isProxyClient,
+                    out var coreMessage,
+                    out long? partnerProxyIdNullable))
                 {
                     // Proxy to proxy communication.
-                    packetBuffer = packetBuffer[1..];
+                    if (partnerProxyIdNullable is { } value && value is Constants.ProxyClientId)
+                        throw new InvalidDataException();
 
-                    long partnerProxyId = 0;
-                    if (isProxyClient)
-                    {
-                        partnerProxyId = BinaryPrimitives.ReadInt64BigEndian(packetBuffer.Span);
-                        packetBuffer = packetBuffer[sizeof(long)..];
-
-                        if (partnerProxyId is Constants.ProxyClientId)
-                            throw new InvalidDataException();
-                    }
+                    long partnerProxyId = partnerProxyIdNullable ?? 0;
 
                     // We don't need a lock to access the dictionary here since it is
                     // only modified by us (the receiver task). We only need a lock to
@@ -339,19 +383,19 @@ public class Proxy : IInstance
                         out var activeConnections))
                         throw new InvalidDataException();
 
-                    long connectionId = BinaryPrimitives.ReadInt64BigEndian(packetBuffer.Span);
-                    packetBuffer = packetBuffer[sizeof(long)..];
+                    long connectionId = BinaryPrimitives.ReadInt64BigEndian(coreMessage.Span);
+                    coreMessage = coreMessage[sizeof(long)..];
 
-                    if (packetBuffer.Length >= + 1 + sizeof(int) &&
-                        packetBuffer.Span[0] is 0x00 &&
+                    if (coreMessage.Length >= +1 + sizeof(int) &&
+                        coreMessage.Span[0] is 0x00 &&
                         isProxyClient)
                     {
                         // Open a new connection, if we are the proxy-client.
                         int port = BinaryPrimitives.ReadInt32BigEndian(
-                            packetBuffer.Span[1..]);
+                            coreMessage.Span[1..]);
 
                         string hostname = Encoding.UTF8.GetString(
-                            packetBuffer.Span[(1 + sizeof(int))..]);
+                            coreMessage.Span[(1 + sizeof(int))..]);
 
                         var remoteClient = new TcpClient();
 
@@ -387,15 +431,15 @@ public class Proxy : IInstance
 
                         if (connection is not null)
                         {
-                            if (packetBuffer.Length >= 1 &&
-                                packetBuffer.Span[0] is 0x01)
+                            if (coreMessage.Length >= 1 &&
+                                coreMessage.Span[0] is 0x01)
                             {
                                 // Transmit the data packet (or shutdown the connection if
                                 // the length is 0).
                                 // Need to copy the array because the caller might reuse
                                 // the packet array.
-                                var newPacket = new byte[packetBuffer.Length - 1];
-                                packetBuffer[1..].CopyTo(newPacket);
+                                var newPacket = new byte[coreMessage.Length - 1];
+                                coreMessage[1..].CopyTo(newPacket);
 
                                 try
                                 {
@@ -411,20 +455,20 @@ public class Proxy : IInstance
                                     await connection.StopAsync();
                                 }
                             }
-                            else if (packetBuffer.Length >= 1 &&
-                                packetBuffer.Span[0] is 0x02)
+                            else if (coreMessage.Length >= 1 &&
+                                coreMessage.Span[0] is 0x02)
                             {
                                 // Abort the connection, which will reset it immediately. We
                                 // use StopAsync() to ensure the connection is removed from
                                 // the list of active connections before we continue.
                                 await connection.StopAsync();
                             }
-                            else if (packetBuffer.Length >= sizeof(int) &&
-                                packetBuffer.Span[0] is 0x03)
+                            else if (coreMessage.Length >= sizeof(int) &&
+                                coreMessage.Span[0] is 0x03)
                             {
                                 // Update the receive window size.
                                 int windowSize = BinaryPrimitives.ReadInt32BigEndian(
-                                    packetBuffer.Span[1..]);
+                                    coreMessage.Span[1..]);
 
                                 connection.UpdateReceiveWindow(windowSize);
                             }
@@ -460,50 +504,38 @@ public class Proxy : IInstance
             receiveBuffer =>
             {
                 // Forward the data packet.
-                var response = new byte[1 + (this.proxyServerConnectionDescriptors is null ? sizeof(long) : 0) + 
-                    sizeof(long) + 1 + receiveBuffer.Length];
+                int length = sizeof(long) + 1 + receiveBuffer.Length;
 
-                int pos = 0;
-                response[pos++] = Constants.TypeProxyToProxyCommunication;
+                var (message, response) = PreparePartnerProxyMessage(
+                    length,
+                    this.proxyServerConnectionDescriptors is null ? partnerProxyId : null);
 
-                if (this.proxyServerConnectionDescriptors is null)
-                {
-                    BinaryPrimitives.WriteInt64BigEndian(response.AsSpan()[pos..], partnerProxyId);
-                    pos += sizeof(long);
-                }
+                BinaryPrimitives.WriteInt64BigEndian(response.Span, connectionId);
+                int pos = sizeof(long);
 
-                BinaryPrimitives.WriteInt64BigEndian(response.AsSpan()[pos..], connectionId);
-                pos += sizeof(long);
-
-                response[pos++] = 0x01;
-                receiveBuffer.CopyTo(response.AsMemory()[pos..]);
+                response.Span[pos++] = 0x01;
+                receiveBuffer.CopyTo(response[pos..]);
                 pos += receiveBuffer.Length;
 
-                endpoint.SendMessageByQueue(response);
+                endpoint.SendMessageByQueue(message);
             },
             window =>
             {
                 // Forward the transmit window update.
-                var response = new byte[1 + (this.proxyServerConnectionDescriptors is null ? sizeof(long) : 0) + 
-                    sizeof(long) + 1 + sizeof(int)];
+                int length = sizeof(long) + 1 + sizeof(int);
 
-                int pos = 0;
-                response[pos++] = Constants.TypeProxyToProxyCommunication;
+                var (message, response) = PreparePartnerProxyMessage(
+                    length,
+                    this.proxyServerConnectionDescriptors is null ? partnerProxyId : null);
 
-                if (this.proxyServerConnectionDescriptors is null)
-                {
-                    BinaryPrimitives.WriteInt64BigEndian(response.AsSpan()[pos..], partnerProxyId);
-                    pos += sizeof(long);
-                }
+                BinaryPrimitives.WriteInt64BigEndian(response.Span, connectionId);
+                int pos = sizeof(long);
 
-                BinaryPrimitives.WriteInt64BigEndian(response.AsSpan()[pos..], connectionId);
-                pos += sizeof(long);
-
-                response[pos++] = 0x03;
-                BinaryPrimitives.WriteInt32BigEndian(response.AsSpan()[pos..], window);
+                response.Span[pos++] = 0x03;
+                BinaryPrimitives.WriteInt32BigEndian(response.Span[pos..], window);
                 pos += sizeof(int);
 
-                endpoint.SendMessageByQueue(response);
+                endpoint.SendMessageByQueue(message);
             },
             isAbort =>
             {
@@ -520,24 +552,18 @@ public class Proxy : IInstance
                 if (isAbort)
                 {
                     // Notify the partner that the connection was aborted.
-                    var response = new byte[1 + (this.proxyServerConnectionDescriptors is null ? sizeof(long) : 0) +
-                        sizeof(long) + 1];
+                    int length = sizeof(long) + 1;
 
-                    int pos = 0;
-                    response[pos++] = Constants.TypeProxyToProxyCommunication;
+                    var (message, response) = PreparePartnerProxyMessage(
+                        length,
+                        this.proxyServerConnectionDescriptors is null ? partnerProxyId : null);
 
-                    if (this.proxyServerConnectionDescriptors is null)
-                    {
-                        BinaryPrimitives.WriteInt64BigEndian(response.AsSpan()[pos..], partnerProxyId);
-                        pos += sizeof(long);
-                    }
+                    BinaryPrimitives.WriteInt64BigEndian(response.Span, connectionId);
+                    int pos = sizeof(long);
 
-                    BinaryPrimitives.WriteInt64BigEndian(response.AsSpan()[pos..], connectionId);
-                    pos += sizeof(long);
+                    response.Span[pos++] = 0x02;
 
-                    response[pos++] = 0x02;
-
-                    endpoint.SendMessageByQueue(response);
+                    endpoint.SendMessageByQueue(message);
                 }
             });
 
@@ -627,21 +653,22 @@ public class Proxy : IInstance
             // done in the same lock, as otherwise it could happen that we would aleady receive
             // messages for the connection but wouldn't find it in the list.
             var hostnameBytes = Encoding.UTF8.GetBytes(descriptor.RemoteHost);
-            var response = new byte[1 + sizeof(long) + 1 + sizeof(int) + hostnameBytes.Length];
-            response[0] = Constants.TypeProxyToProxyCommunication;
+            int responseLength = sizeof(long) + 1 + sizeof(int) + hostnameBytes.Length;
 
-            BinaryPrimitives.WriteInt64BigEndian(response.AsSpan()[1..], connectionId);
-            response[1 + sizeof(long)] = 0x00;
+            var (message, response) = PreparePartnerProxyMessage(responseLength, null);
+
+            BinaryPrimitives.WriteInt64BigEndian(response.Span, connectionId);
+            response.Span[sizeof(long)] = 0x00;
 
             BinaryPrimitives.WriteInt32BigEndian(
-                response.AsSpan()[(1 + sizeof(long) + 1)..],
+                response.Span[(sizeof(long) + 1)..],
                 descriptor.RemotePort);
 
-            hostnameBytes.CopyTo(response.AsSpan()[(1 + sizeof(long) + 1 + sizeof(int))..]);
+            hostnameBytes.CopyTo(response.Span[(sizeof(long) + 1 + sizeof(int))..]);
 
             // Send the message. From that point, our receiver task might already receive
             // events for the connection, which then need to wait for the lock.
-            this.tcpEndpoint!.SendMessageByQueue(response);
+            this.tcpEndpoint!.SendMessageByQueue(message);
 
             // Add the connection to the list and start it.
             this.StartTcpTunnelConnection(
