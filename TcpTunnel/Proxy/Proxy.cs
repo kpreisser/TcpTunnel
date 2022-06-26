@@ -624,6 +624,10 @@ public class Proxy : IInstance
         TcpClient client,
         ProxyServerConnectionDescriptor descriptor)
     {
+        // After the socket is connected, configure it to disable the Nagle
+        // algorithm, disable delayed ACKs, and enable TCP keep-alive.
+        SocketConfigurator.ConfigureSocket(client.Client, enableKeepAlive: true);
+
         lock (this.syncRoot)
         {
             if (!this.activePartnerProxiesAndConnections.TryGetValue(
