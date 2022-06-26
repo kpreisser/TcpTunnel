@@ -506,15 +506,15 @@ public class Proxy : IInstance
                 // Forward the data packet.
                 int length = sizeof(long) + 1 + receiveBuffer.Length;
 
-                var (message, response) = PreparePartnerProxyMessage(
+                var (message, coreMessage) = PreparePartnerProxyMessage(
                     length,
                     this.proxyServerConnectionDescriptors is null ? partnerProxyId : null);
 
-                BinaryPrimitives.WriteInt64BigEndian(response.Span, connectionId);
+                BinaryPrimitives.WriteInt64BigEndian(coreMessage.Span, connectionId);
                 int pos = sizeof(long);
 
-                response.Span[pos++] = 0x01;
-                receiveBuffer.CopyTo(response[pos..]);
+                coreMessage.Span[pos++] = 0x01;
+                receiveBuffer.CopyTo(coreMessage[pos..]);
                 pos += receiveBuffer.Length;
 
                 endpoint.SendMessageByQueue(message);
@@ -524,15 +524,15 @@ public class Proxy : IInstance
                 // Forward the transmit window update.
                 int length = sizeof(long) + 1 + sizeof(int);
 
-                var (message, response) = PreparePartnerProxyMessage(
+                var (message, coreMessage) = PreparePartnerProxyMessage(
                     length,
                     this.proxyServerConnectionDescriptors is null ? partnerProxyId : null);
 
-                BinaryPrimitives.WriteInt64BigEndian(response.Span, connectionId);
+                BinaryPrimitives.WriteInt64BigEndian(coreMessage.Span, connectionId);
                 int pos = sizeof(long);
 
-                response.Span[pos++] = 0x03;
-                BinaryPrimitives.WriteInt32BigEndian(response.Span[pos..], window);
+                coreMessage.Span[pos++] = 0x03;
+                BinaryPrimitives.WriteInt32BigEndian(coreMessage.Span[pos..], window);
                 pos += sizeof(int);
 
                 endpoint.SendMessageByQueue(message);
@@ -554,14 +554,14 @@ public class Proxy : IInstance
                     // Notify the partner that the connection was aborted.
                     int length = sizeof(long) + 1;
 
-                    var (message, response) = PreparePartnerProxyMessage(
+                    var (message, coreMessage) = PreparePartnerProxyMessage(
                         length,
                         this.proxyServerConnectionDescriptors is null ? partnerProxyId : null);
 
-                    BinaryPrimitives.WriteInt64BigEndian(response.Span, connectionId);
+                    BinaryPrimitives.WriteInt64BigEndian(coreMessage.Span, connectionId);
                     int pos = sizeof(long);
 
-                    response.Span[pos++] = 0x02;
+                    coreMessage.Span[pos++] = 0x02;
 
                     endpoint.SendMessageByQueue(message);
                 }
@@ -659,16 +659,16 @@ public class Proxy : IInstance
             var hostnameBytes = Encoding.UTF8.GetBytes(descriptor.RemoteHost);
             int responseLength = sizeof(long) + 1 + sizeof(int) + hostnameBytes.Length;
 
-            var (message, response) = PreparePartnerProxyMessage(responseLength, null);
+            var (message, coreMessage) = PreparePartnerProxyMessage(responseLength, null);
 
-            BinaryPrimitives.WriteInt64BigEndian(response.Span, connectionId);
-            response.Span[sizeof(long)] = 0x00;
+            BinaryPrimitives.WriteInt64BigEndian(coreMessage.Span, connectionId);
+            coreMessage.Span[sizeof(long)] = 0x00;
 
             BinaryPrimitives.WriteInt32BigEndian(
-                response.Span[(sizeof(long) + 1)..],
+                coreMessage.Span[(sizeof(long) + 1)..],
                 descriptor.RemotePort);
 
-            hostnameBytes.CopyTo(response.Span[(sizeof(long) + 1 + sizeof(int))..]);
+            hostnameBytes.CopyTo(coreMessage.Span[(sizeof(long) + 1 + sizeof(int))..]);
 
             // Send the message. From that point, our receiver task might already receive
             // events for the connection, which then need to wait for the lock.
