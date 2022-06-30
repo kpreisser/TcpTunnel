@@ -196,9 +196,9 @@ internal class ProxyTunnelConnection
                 if (this.connectHandler is not null)
                     await this.connectHandler(this.cts.Token);
 
-                // After connecting, create the transmit task.
                 remoteClientStream = new NetworkStream(remoteClient.Client, ownsSocket: false);
 
+                // After connecting, create the transmit task.
                 transmitTask = ExceptionUtils.StartTask(() => this.RunTransmitTaskAsync(remoteClientStream));
 
                 // Now start to receive.
@@ -206,38 +206,11 @@ internal class ProxyTunnelConnection
 
                 while (true)
                 {
-                    bool wait = false;
-
-                    while (true)
-                    {
-                        // Collect the available window.
-                        for (int i = 0; ; i++)
-                        {
-                            if (i is 0 && wait)
-                                await this.receiveWindowQueueSemaphore.WaitAsync(this.cts.Token);
-                            else if (!this.receiveWindowQueueSemaphore.Wait(0))
-                                break;
-
-                            if (!this.receiveWindowQueue.TryDequeue(out int entry))
-                                throw new InvalidOperationException();
-
-                            checked
-                            {
-                                availableWindow += entry;
-                            }
-                        }
-
-                        // Only continue when the available window is at least as high as
-                        // the window threshold, to avoid scattered packets.
-                        if (availableWindow >= Constants.WindowThreshold)
-                            break;
-
-                        // Insufficient window is available, so we need to wait.
-                        wait = true;
-                    }
-
-                    // Wait until new data is available.
+                    // Wait until more data is available.
                     await remoteClientStream.ReadAsync(Memory<byte>.Empty, this.cts.Token);
+
+                    // Collect the available window, then receive the data.
+                    availableWindow = await this.CollectAvailableWindowAsync(availableWindow);
 
                     var receiveBuffer = ArrayPool<byte>.Shared.Rent(
                         Math.Min(Constants.ReceiveBufferSize, availableWindow));
@@ -245,7 +218,7 @@ internal class ProxyTunnelConnection
                     try
                     {
                         int received = await remoteClientStream.ReadAsync(
-                            receiveBuffer.AsMemory()[..Math.Min(availableWindow, receiveBuffer.Length)],
+                            receiveBuffer.AsMemory()[..Math.Min(receiveBuffer.Length, availableWindow)],
                             this.cts.Token);
 
                         if (received is 0)
@@ -334,6 +307,40 @@ internal class ProxyTunnelConnection
             // Notify that the connection is finished, and report whether it was aborted.
             this.connectionFinishedHandler?.Invoke(isAbort || ctsWasCanceled);
         }
+    }
+
+    private async ValueTask<int> CollectAvailableWindowAsync(int availableWindow)
+    {
+        bool wait = false;
+
+        while (true)
+        {
+            for (bool isFirst = true; ; isFirst = false)
+            {
+                if (isFirst && wait)
+                    await this.receiveWindowQueueSemaphore.WaitAsync(this.cts.Token);
+                else if (!this.receiveWindowQueueSemaphore.Wait(0))
+                    break;
+
+                if (!this.receiveWindowQueue.TryDequeue(out int entry))
+                    throw new InvalidOperationException(); // Should never happen
+
+                checked
+                {
+                    availableWindow += entry;
+                }
+            }
+
+            // Only continue when the available window is at least as high as
+            // the window threshold, to avoid scattered packets.
+            if (availableWindow >= Constants.WindowThreshold)
+                break;
+
+            // Insufficient window is available, so we need to wait.
+            wait = true;
+        }
+
+        return availableWindow;
     }
 
     private async Task RunTransmitTaskAsync(NetworkStream remoteClientStream)

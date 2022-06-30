@@ -463,7 +463,7 @@ public class Proxy : IInstance
                                 // the list of active connections before we continue.
                                 await connection.StopAsync();
                             }
-                            else if (coreMessage.Length >= sizeof(int) &&
+                            else if (coreMessage.Length >= 1 + sizeof(int) &&
                                 coreMessage.Span[0] is 0x03)
                             {
                                 // Update the receive window size.
