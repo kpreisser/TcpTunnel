@@ -5,6 +5,7 @@ namespace TcpTunnel;
 
 internal class Constants
 {
+    // Note: The initial window size is also the max windows size.
     public const int InitialWindowSize = 384 * 1024;
 
     /// <summary>

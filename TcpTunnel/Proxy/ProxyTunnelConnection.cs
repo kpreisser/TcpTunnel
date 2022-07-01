@@ -25,16 +25,20 @@ internal class ProxyTunnelConnection
     private readonly ConcurrentQueue<ReadOnlyMemory<byte>> transmitDataQueue;
     private readonly SemaphoreSlim transmitDataQueueSemaphore;
 
-    /// <summary>
-    /// A queue which contains at most 2 entries. The sum of all entries is
-    /// the remaining receive window.
-    /// The receive task only starts to receive if the window is at least 1/48
-    /// of the default window size.
-    /// </summary>
-    private readonly ConcurrentQueue<int> receiveWindowQueue;
-    private readonly SemaphoreSlim receiveWindowQueueSemaphore;
+    private readonly SemaphoreSlim receiveWindowAvailableSemaphore;
 
-    // The window that is currently available for enqueuing transmit data.
+    /// <summary>
+    /// Window that is available for the receive task.
+    /// </summary>
+    /// <remarks>
+    /// The receive task only starts to receive if the window is at least
+    /// the <see cref="Constants.WindowThreshold"/>.
+    /// </remarks>
+    private int receiveWindowAvailable = Constants.InitialWindowSize;
+    
+    /// <summary>
+    /// Window that is currently available for enqueuing transmit data.
+    /// </summary>
     private int transmitWindowAvailable = Constants.InitialWindowSize;
 
     private Task? receiveTask;
@@ -58,8 +62,7 @@ internal class ProxyTunnelConnection
         this.cts = new();
         this.transmitDataQueue = new();
         this.transmitDataQueueSemaphore = new(0);
-        this.receiveWindowQueue = new();
-        this.receiveWindowQueueSemaphore = new(0);
+        this.receiveWindowAvailableSemaphore = new(0);
     }
 
     public bool IsSendChannelClosed
@@ -76,9 +79,6 @@ internal class ProxyTunnelConnection
 
     public void Start()
     {
-        // Add the initial window size.
-        this.UpdateReceiveWindow(Constants.InitialWindowSize);
-
         // Create the receive task (the transmit task will later be created by the
         // receive task).
         this.receiveTask = ExceptionUtils.StartTask(this.RunReceiveTaskAsync);
@@ -122,7 +122,7 @@ internal class ProxyTunnelConnection
 
     public void UpdateReceiveWindow(int newWindow)
     {
-        if (newWindow < 0)
+        if (newWindow is < 0 or > Constants.InitialWindowSize)
             throw new ArgumentOutOfRangeException(nameof(newWindow));
 
         lock (this.syncRoot)
@@ -130,30 +130,16 @@ internal class ProxyTunnelConnection
             if (this.receiveTaskStopped)
                 return;
 
-            int window = 0;
-
-            while (this.receiveWindowQueueSemaphore.Wait(0))
-            {
-                if (!this.receiveWindowQueue.TryDequeue(out int entry))
-                    throw new InvalidOperationException();
-
-                checked
-                {
-                    window += entry;
-                }
-            }
-
-            checked
-            {
-                window += newWindow;
-            }
-
+            int resultingWindow = Interlocked.Add(ref this.receiveWindowAvailable, newWindow);
+            
             // The new window size must not be greater than the initial window size.
-            if (window > Constants.InitialWindowSize)
+            if (resultingWindow > Constants.InitialWindowSize || resultingWindow < newWindow)
                 throw new InvalidOperationException();
 
-            this.receiveWindowQueue.Enqueue(window);
-            this.receiveWindowQueueSemaphore.Release();
+            // Additionally, release the semaphore if the receive task is waiting
+            // for it.
+            if (this.receiveWindowAvailableSemaphore.CurrentCount is 0)
+                this.receiveWindowAvailableSemaphore.Release();
         }
     }
 
@@ -202,7 +188,7 @@ internal class ProxyTunnelConnection
                 transmitTask = ExceptionUtils.StartTask(() => this.RunTransmitTaskAsync(remoteClientStream));
 
                 // Now start to receive.
-                int availableWindow = 0;
+                int currentWindow = 0;
 
                 while (true)
                 {
@@ -210,21 +196,21 @@ internal class ProxyTunnelConnection
                     await remoteClientStream.ReadAsync(Memory<byte>.Empty, this.cts.Token);
 
                     // Collect the available window, then receive the data.
-                    availableWindow = await this.CollectAvailableWindowAsync(availableWindow);
+                    currentWindow = await this.CollectAvailableWindowAsync(currentWindow);
 
                     var receiveBuffer = ArrayPool<byte>.Shared.Rent(
-                        Math.Min(Constants.ReceiveBufferSize, availableWindow));
+                        Math.Min(Constants.ReceiveBufferSize, currentWindow));
 
                     try
                     {
                         int received = await remoteClientStream.ReadAsync(
-                            receiveBuffer.AsMemory()[..Math.Min(receiveBuffer.Length, availableWindow)],
+                            receiveBuffer.AsMemory()[..Math.Min(receiveBuffer.Length, currentWindow)],
                             this.cts.Token);
 
                         if (received is 0)
                             break; // Connection has been closed.
 
-                        availableWindow -= received;
+                        currentWindow -= received;
 
                         this.receiveHandler?.Invoke(receiveBuffer.AsMemory()[..received]);
                     }
@@ -248,7 +234,7 @@ internal class ProxyTunnelConnection
                 lock (this.syncRoot)
                 {
                     this.receiveTaskStopped = true;
-                    this.receiveWindowQueueSemaphore.Dispose();
+                    this.receiveWindowAvailableSemaphore.Dispose();
                 }
 
                 // Invoke the receive handler with an empty array, to notify it that the
@@ -309,45 +295,39 @@ internal class ProxyTunnelConnection
         }
     }
 
-    private async ValueTask<int> CollectAvailableWindowAsync(int availableWindow)
+    private async ValueTask<int> CollectAvailableWindowAsync(int currentWindow)
     {
-        bool wait = false;
-
-        while (true)
+        for (bool wait = false; ; wait = true)
         {
-            for (bool isFirst = true; ; isFirst = false)
+            if (wait)
+                await this.receiveWindowAvailableSemaphore.WaitAsync(this.cts.Token);
+
+            int availableWindow = Interlocked.Exchange(ref this.receiveWindowAvailable, 0);
+
+            checked
             {
-                if (isFirst && wait)
-                    await this.receiveWindowQueueSemaphore.WaitAsync(this.cts.Token);
-                else if (!this.receiveWindowQueueSemaphore.Wait(0))
-                    break;
-
-                if (!this.receiveWindowQueue.TryDequeue(out int entry))
-                    throw new InvalidOperationException(); // Should never happen
-
-                checked
-                {
-                    availableWindow += entry;
-                }
+                currentWindow += availableWindow;
             }
+
+            // The new window size must not be greater than the initial window size.
+            if (currentWindow > Constants.InitialWindowSize)
+                throw new InvalidOperationException();
 
             // Only continue when the available window is at least as high as
             // the window threshold, to avoid scattered packets.
-            if (availableWindow >= Constants.WindowThreshold)
+            // Otherwise, if insufficient window is available, we need to wait.
+            if (currentWindow >= Constants.WindowThreshold)
                 break;
-
-            // Insufficient window is available, so we need to wait.
-            wait = true;
         }
 
-        return availableWindow;
+        return currentWindow;
     }
 
     private async Task RunTransmitTaskAsync(NetworkStream remoteClientStream)
     {
         try
         {
-            int availableWindow = 0;
+            int accumulatedWindow = 0;
 
             while (true)
             {
@@ -369,15 +349,15 @@ internal class ProxyTunnelConnection
                 // Update the transmit window.
                 checked
                 {
-                    availableWindow += data.Length;
+                    accumulatedWindow += data.Length;
                 }
 
                 // Only raise the window update event if we reached the threshold,
                 // to avoid flooding the connection with small window updates.
-                if (availableWindow >= Constants.WindowThreshold)
+                if (accumulatedWindow >= Constants.WindowThreshold)
                 {
-                    this.UpdateTransmitWindow(availableWindow);
-                    availableWindow = 0;
+                    this.UpdateTransmitWindow(accumulatedWindow);
+                    accumulatedWindow = 0;
                 }
             }
         }
