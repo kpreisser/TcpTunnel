@@ -266,8 +266,9 @@ internal class ProxyTunnelConnection
         {
             // When we broke out due to an exception, ensure to reset the connection.
             // We also need to check whether cancellation has been requested, because
-            // it could happen that Abort() is called after we already entered the
-            // above 'finally' clause and waited for the transmit task to finish.
+            // it could happen that Abort() was called after we already entered the
+            // above 'finally' clause (due to a normal close) and waited for the
+            // transmit task to finish.
             bool ctsWasCanceled = this.cts.Token.IsCancellationRequested;
 
             try
