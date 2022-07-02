@@ -35,7 +35,7 @@ internal class ProxyTunnelConnection
     /// the <see cref="Constants.WindowThreshold"/>.
     /// </remarks>
     private int receiveWindowAvailable = Constants.InitialWindowSize;
-    
+
     /// <summary>
     /// Window that is currently available for enqueuing transmit data.
     /// </summary>
@@ -131,7 +131,7 @@ internal class ProxyTunnelConnection
                 return;
 
             int resultingWindow = Interlocked.Add(ref this.receiveWindowAvailable, newWindow);
-            
+
             // The new window size must not be greater than the initial window size.
             if (resultingWindow > Constants.InitialWindowSize || resultingWindow < newWindow)
                 throw new InvalidOperationException();
@@ -269,7 +269,15 @@ internal class ProxyTunnelConnection
             // it could happen that Abort() was called after we already entered the
             // above 'finally' clause (due to a normal close) and waited for the
             // transmit task to finish.
-            bool ctsWasCanceled = this.cts.Token.IsCancellationRequested;
+            bool ctsWasCanceled;
+
+            lock (this.syncRoot)
+            {
+                ctsWasCanceled = this.cts.Token.IsCancellationRequested;
+                this.ctsDisposed = true;
+            }
+
+            this.cts.Dispose();
 
             try
             {
@@ -282,14 +290,6 @@ internal class ProxyTunnelConnection
             {
                 // Ignore
             }
-
-            // Dispose the CTS.
-            lock (this.syncRoot)
-            {
-                this.ctsDisposed = true;
-            }
-
-            this.cts.Dispose();
 
             // Notify that the connection is finished, and report whether it was aborted.
             this.connectionFinishedHandler?.Invoke(isAbort || ctsWasCanceled);
