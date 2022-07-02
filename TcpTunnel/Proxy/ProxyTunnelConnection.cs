@@ -196,7 +196,7 @@ internal class ProxyTunnelConnection
                     await remoteClientStream.ReadAsync(Memory<byte>.Empty, this.cts.Token);
 
                     // Collect the available window, then receive the data.
-                    currentWindow = await this.CollectAvailableWindowAsync(currentWindow);
+                    currentWindow = await CollectAvailableWindowAsync(currentWindow);
 
                     var receiveBuffer = ArrayPool<byte>.Shared.Rent(
                         Math.Min(Constants.ReceiveBufferSize, currentWindow));
@@ -293,28 +293,28 @@ internal class ProxyTunnelConnection
             // Notify that the connection is finished, and report whether it was aborted.
             this.connectionFinishedHandler?.Invoke(isAbort || ctsWasCanceled);
         }
-    }
 
-    private async ValueTask<int> CollectAvailableWindowAsync(int currentWindow)
-    {
-        while (true)
+        async ValueTask<int> CollectAvailableWindowAsync(int currentWindow)
         {
-            checked
+            while (true)
             {
-                currentWindow += Interlocked.Exchange(ref this.receiveWindowAvailable, 0);
+                checked
+                {
+                    currentWindow += Interlocked.Exchange(ref this.receiveWindowAvailable, 0);
+                }
+
+                // The new window size must not be greater than the initial window size.
+                if (currentWindow > Constants.InitialWindowSize)
+                    throw new InvalidOperationException();
+
+                // Only return when the available window is at least as high as
+                // the window threshold, to avoid scattered packets.
+                if (currentWindow >= Constants.WindowThreshold)
+                    return currentWindow;
+
+                // Otherwise, we need to wait until sufficient window is available.
+                await this.receiveWindowAvailableSemaphore.WaitAsync(this.cts.Token);
             }
-
-            // The new window size must not be greater than the initial window size.
-            if (currentWindow > Constants.InitialWindowSize)
-                throw new InvalidOperationException();
-
-            // Only return when the available window is at least as high as
-            // the window threshold, to avoid scattered packets.
-            if (currentWindow >= Constants.WindowThreshold)
-                return currentWindow;
-
-            // Otherwise, we need to wait until sufficient window is available.
-            await this.receiveWindowAvailableSemaphore.WaitAsync(this.cts.Token);
         }
     }
 
