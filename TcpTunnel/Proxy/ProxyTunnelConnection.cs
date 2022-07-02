@@ -297,30 +297,25 @@ internal class ProxyTunnelConnection
 
     private async ValueTask<int> CollectAvailableWindowAsync(int currentWindow)
     {
-        for (bool wait = false; ; wait = true)
+        while (true)
         {
-            if (wait)
-                await this.receiveWindowAvailableSemaphore.WaitAsync(this.cts.Token);
-
-            int availableWindow = Interlocked.Exchange(ref this.receiveWindowAvailable, 0);
-
             checked
             {
-                currentWindow += availableWindow;
+                currentWindow += Interlocked.Exchange(ref this.receiveWindowAvailable, 0);
             }
 
             // The new window size must not be greater than the initial window size.
             if (currentWindow > Constants.InitialWindowSize)
                 throw new InvalidOperationException();
 
-            // Only continue when the available window is at least as high as
+            // Only return when the available window is at least as high as
             // the window threshold, to avoid scattered packets.
-            // Otherwise, if insufficient window is available, we need to wait.
             if (currentWindow >= Constants.WindowThreshold)
-                break;
-        }
+                return currentWindow;
 
-        return currentWindow;
+            // Otherwise, we need to wait until sufficient window is available.
+            await this.receiveWindowAvailableSemaphore.WaitAsync(this.cts.Token);
+        }
     }
 
     private async Task RunTransmitTaskAsync(NetworkStream remoteClientStream)
