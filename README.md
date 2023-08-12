@@ -1,17 +1,17 @@
 # TcpTunnel
 
-TcpTunnel is a program implemented in C# (.NET 7.0) that allows to tunnel TCP connections through a server (gateway) to a remote machine,
-for example to access services that are running behind a firewall or NAT.
+TcpTunnel is a program implemented in C# (.NET 7.0) that allows to tunnel TCP connections through a server (gateway)
+to a remote machine, for example to access services that are running behind a firewall or NAT.
 
 A working configuration consists of three nodes:
 - **Gateway**: Runs on a (server) machine that is accessible for both proxy endpoints (e.g. on a public server).
-  It listens for incoming TCP connections from the proxy endpoints (proxy-client and proxy-server) and forwards
+  It listens for incoming TCP connections from the proxy endpoints (*proxy-client* and *proxy-server*) and forwards
   data from one proxy endpoint to the corresponding partner proxy endpoint.
-- **Proxy-Server**: Connects to the **Gateway** and listens for incoming TCP connections on previously configured
-  ports. When a connection arrives, it forwards it to the **Gateway**, which in turn forwards the connection to
-  the **Proxy-Client**.
-- **Proxy-Client**: Connects to the **Gateway** and waits for forwarded connections received through the
-  **Gateway** from the **Proxy-Server**. When receiving such a forwarded connection, it opens a TCP connection
+- **Proxy-Server**: Connects to the *Gateway* and listens for incoming TCP connections on previously configured
+  ports. When a connection arrives, it forwards it to the *Gateway*, which in turn forwards the connection to
+  the *Proxy-Client*.
+- **Proxy-Client**: Connects to the *Gateway* and waits for forwarded connections received through the
+  *Gateway* from the *Proxy-Server*. When receiving such a forwarded connection, it opens a TCP connection
   to the specified endpoint and forwards the data to it.
 
 For example, imagine you have some TCP service (like a VNC server) running on a machine within a LAN that
@@ -38,8 +38,9 @@ sample settings will get copied to the output directory which you can use as a t
 ## Features:
 - Uses async I/O for high scalability.
 - Supports SSL/TLS (currently on Windows only) and password authentication for the gateway connections.
-- Multiplexes multiple (tunneled) TCP connections over a single one.
-- Uses a window for flow control for tunneled connections.
+- Multiplexes multiple (tunneled) TCP connections over a single connection.
+- Uses a window for flow control for tunneled TCP connections.
+- Automatically recovers when one of the nodes (*Gateway*, *Proxy-Server*, *Proxy-Client*) was temporarily unavailable.
 - Can be installed as service on Windows.
 
 ## Building:
