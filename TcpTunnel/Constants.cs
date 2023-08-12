@@ -14,7 +14,7 @@ internal class Constants
     /// </summary>
     public const int WindowThreshold = InitialWindowSize / 12;
 
-    // The receive buffer should not be larger than the receive threashold, to avoid
+    // The receive buffer should not be larger than the window threshold, to avoid
     // scattered packets due to too less window being available.
     public const int ReceiveBufferSize = WindowThreshold;
 

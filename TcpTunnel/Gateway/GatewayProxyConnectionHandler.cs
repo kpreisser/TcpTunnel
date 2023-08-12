@@ -14,7 +14,7 @@ using SystemNetEndpoint = System.Net.EndPoint;
 namespace TcpTunnel.Gateway;
 
 /*
- * Architeture:
+ * Architecture:
  * - Gateway: Listens on the specified port for incoming proxy connections that authenticate for a session ID.
  *   Only one proxy-client can connect to the session, but multiple proxy-servers can connect to the session.
  *   The main functionality is to forward packets between partner proxies (proxy-client to a proxy-server or vice versa).
@@ -27,7 +27,7 @@ namespace TcpTunnel.Gateway;
  * 0x01: (Gateway to Proxy) Authentication Result.
  *     - 0x00: Auth failed.
  *     - 0x01: Auth successful.
- * 0x02: (Gateway to Proxy) Session Status (sent after successfull authentication if partner proxies are available, and during runtime if status changes):
+ * 0x02: (Gateway to Proxy) Session Status (sent after successful authentication if partner proxies are available, and during runtime if status changes):
  *     + [if proxy is proxy-client) Partner Proxy ID (Int64)
  *     + 0x01: Partner proxy is available (in case of proxy-server, this means the proxy needs to acknowledge the new session iteration) or 0x00: Partner proxy is unavailable.
  * 0x03 (Proxy to Gateway): [if proxy is proxy-server] Acknowledge new session iteration after being informed that the partner proxy is now available.

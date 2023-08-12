@@ -42,7 +42,7 @@ use as a template.
 - Multiplexes multiple (tunneled) TCP connections over a single connection.
 - Uses a window for flow control for tunneled TCP connections.
 - Automatically recovers when one of the nodes (*Gateway*, *Proxy-Server*, *Proxy-Client*) was temporarily unavailable.
-- Can be installed as service on Windows.
+- On Windows, it can be installed as service.
 
 ## Building:
 - Install the [.NET 7.0 SDK](https://dotnet.microsoft.com/download) or higher.
