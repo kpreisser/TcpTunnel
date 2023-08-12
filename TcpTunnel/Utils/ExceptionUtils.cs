@@ -9,6 +9,13 @@ internal static class ExceptionUtils
     /// Returns true if a exception should be rethrown instead of be caught.
     /// </summary>
     /// <param name="ex"></param>
+    /// <remarks>
+    /// An <see cref="OutOfMemoryException"/> is handled specially by failing directly (with
+    /// <see cref="Environment.FailFast(string?)"/>) instead of returning <c>false</c>, to ensure
+    /// the app doesn't enter an inconsistent state when <c>finally</c> handlers would be executed
+    /// before terminating the app due to an unhandled exception (when the OOM would be thrown
+    /// at an unexpected location).
+    /// </remarks>
     /// <returns></returns>
     public static bool CanCatch(this Exception ex)
     {

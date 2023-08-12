@@ -56,7 +56,7 @@ internal class TcpClientFramingEndpoint : TcpClientEndpoint
                 int readCount = await this.Stream.ReadAtLeastAsync(
                     lengthBuf.AsMemory()[..lengthSize],
                     lengthSize,
-                    throwOnEndOfStrem: false,
+                    throwOnEndOfStream: false,
                     this.CancellationToken);
 
                 if (readCount is 0)
