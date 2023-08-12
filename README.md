@@ -12,7 +12,7 @@ A working configuration consists of three nodes:
   the *Proxy-Client*.
 - **Proxy-Client**: Connects to the *Gateway* and waits for forwarded connections received through the
   *Gateway* from the *Proxy-Server*. When receiving such a forwarded connection, it opens a TCP connection
-  to the specified endpoint and forwards the data to it.
+  to the specified target endpoint and forwards the data to it.
 
 For example, imagine you have some TCP service (like a VNC server) running on a machine within a LAN that
 has internet access (maybe only through NAT so it's not possible to use port forwarding or a VPN), and you
