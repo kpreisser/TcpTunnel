@@ -32,15 +32,6 @@ namespace TestGateway
             Console.WriteLine("Stopping gateway...");
             server.Stop();
             Console.WriteLine("Gateway stopped.");
-
-            //new System.Threading.Thread(() =>
-            //{
-            //    while (true)
-            //    {
-            //        System.Threading.Thread.Sleep(3000);
-            //        GC.Collect();
-            //    }
-            //}).Start();
         }
     }
 }

@@ -19,15 +19,6 @@ namespace TestProxyClient
             Console.WriteLine("Stopping Proxy-Client...");
             firstClient.Stop();
             Console.WriteLine("Proxy-Client stopped.");
-
-            //new System.Threading.Thread(() =>
-            //{
-            //    while (true)
-            //    {
-            //        System.Threading.Thread.Sleep(3000);
-            //        GC.Collect();
-            //    }
-            //}).Start();
         }
     }
 }

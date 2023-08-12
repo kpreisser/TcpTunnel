@@ -1,13 +1,19 @@
 ﻿<Settings xmlns="https://github.com/kpreisser/TcpTunnel">
+  <!-- A 'Gateway' instance listens on the specified TCP port (optionally using SSL/TLS), and waits for
+       connections from both the 'Proxy-Server' and the 'Proxy-Client' instances. -->
   <Instance type="gateway">
     <!-- You can define multiple listeners. -->
-    <!-- 'certificateHash' is specified when using SSL/TLS, or omitted when not using SSL/TLS. -->
+    <!-- 'certificateHash' is specified when using SSL/TLS, or omitted when not using SSL/TLS. 
+         When specified, it contains the hash of an SSL/TLS certificate used from the Windows Certificate Store.
+         The cert needs to be stored in the current user's or the local machine's "My" certificate store, and
+         you need to be able to access the private key (i.e. you probably need to run the app as administrator
+         when the cert is stored in the local machine store).  -->
     <!-- Note: 'ip' is optional -->
     <Listener port="23654" certificateHash="0000000000000000000000000000000000000000" />
     <Listener ip="127.0.0.20" port="23654" />
     
-    <!-- Specifies a session. Note that multiple proxy-server clients can connect, but only
-		 one proxy-client can connect. -->
+    <!-- Specify one or more sessions. Note that for each session, multiple proxy-server clients can connect,
+         but only a single proxy-client can connect. -->
     <Session id="123" proxyClientPassword="my_secret_password_client" proxyServerPassword="my_secret_password_server" />
     <Session id="124" proxyClientPassword="my_other_password_client" proxyServerPassword="my_other_password_server" />
   </Instance>
