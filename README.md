@@ -17,23 +17,24 @@ A working configuration consists of three nodes:
 For example, imagine you have some TCP service (like a VNC server) running on a machine within a LAN that
 has internet access (maybe only through NAT so it's not possible to use port forwarding or a VPN), and you
 want to securely connect to this service from a machine on another network.
-Additionally, you have a server (e.g. VPS) with a publicly domain and you have a SSL/TLS certificate for it.
+Additionally, you have a server (e.g. VPS) with a public domain and you have a SSL certificate for it.
 
-In this case, you can use the TcpTunnel with the following configuration:
-- Run the **Gateway** on the VPS server, configure it to listen at a specific TCP port using SSL/TLS (SSL/TLS
+In this case, you could use the TcpTunnel with the following configuration:
+- Run the **Gateway** on the VPS server and configure it to listen at a specific TCP port using SSL/TLS (SSL/TLS
   for the Gateway is currently only supported on **Windows**), and to allow a session with an ID and password.
-- Run the **Proxy-Client** on the machine that has access to the TCP service (VNC server), configuring it to
+- Run the **Proxy-Client** on the machine that has access to the TCP service (VNC server) and configure it to
   connect to the host and port of the Gateway.
-- Run the **Proxy-Server** on your machine where you want to connect to the TCP service (VNC server), configuring
+- Run the **Proxy-Server** on your machine where you want to access the TCP service (VNC server), and configure
   it to connect to the host and port of the Gateway, and to listen on a specific TCP port (like 5920) that
-  should get forwarded to the Proxy-Client to a specific host and TCP port (like localhost:5900).
+  should get forwarded to the Proxy-Client to a specific target host and TCP port (like localhost:5900).
 
 The following image illustrates this approach:
 ![](tcptunnel-illustration.png)
 
 ## Configuration
-The TcpTunnel is configured via an XML file using the name `settings.xml`. When building the application,
-sample settings will get copied to the output directory which you can use as a template.
+The TcpTunnel is configured via an XML file with the name `settings.xml` in the application's directory.
+When building the application, sample setting files will get copied to the output directory which you can
+use as a template.
 
 ## Features:
 - Uses async I/O for high scalability.
