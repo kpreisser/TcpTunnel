@@ -18,8 +18,6 @@ namespace TcpTunnel.Networking;
 /// </remarks>
 internal abstract partial class Endpoint
 {
-    #region ---------- Private const fields ----------
-
     // TODO: Make this configurable.
     /// <summary>
     /// The maximum byte length of messages that can be queued before the connection
@@ -40,25 +38,13 @@ internal abstract partial class Endpoint
 
     private const int PingTimeout = 120 * 1000;
 
-    #endregion
-
-    #region ---------- Protected static readonly fields ----------
-
     protected static readonly Encoding TextMessageEncoding =
             new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
-
-    #endregion
-
-    #region ---------- Private readonly fields ----------
 
     private readonly bool useSendQueue;
     private readonly bool usePingTimer;
 
-    private readonly object sendQueueSemaphoreSyncRoot = new object();
-
-    #endregion
-
-    #region ---------- Private fields ----------
+    private readonly object sendQueueSemaphoreSyncRoot = new();
 
     private CancellationTokenSource? cancellationTokenSource;
 
@@ -75,10 +61,6 @@ internal abstract partial class Endpoint
 
     private volatile bool ignorePingTimeout;
 
-    #endregion
-
-    #region ---------- Protected constructors ----------
-
     protected Endpoint(bool useSendQueue, bool usePingTimer)
         : base()
     {
@@ -86,18 +68,10 @@ internal abstract partial class Endpoint
         this.usePingTimer = usePingTimer;
     }
 
-    #endregion
-
-    #region ---------- Protected properties ----------
-
     protected CancellationToken CancellationToken
     {
         get => this.cancellationTokenSource!.Token;
     }
-
-    #endregion
-
-    #region ---------- Public methods ----------
 
     /// <summary>
     /// Cancels pending I/O operations, which will abort the current connection.
@@ -326,10 +300,6 @@ internal abstract partial class Endpoint
         }
     }
 
-    #endregion
-
-    #region ---------- Protected methods ----------
-
     protected virtual ValueTask HandleInitializationAsync()
     {
         // Do nothing.
@@ -367,10 +337,6 @@ internal abstract partial class Endpoint
     {
         return runFunc();
     }
-
-    #endregion
-
-    #region ---------- Private methods ----------
 
     private void StartPingTask()
     {
@@ -581,6 +547,4 @@ internal abstract partial class Endpoint
             }
         }
     }
-
-    #endregion
 }

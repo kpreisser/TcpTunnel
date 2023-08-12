@@ -5,8 +5,6 @@ namespace TcpTunnel.Networking;
 
 internal struct ReceivedMessage
 {
-    #region ---------- Private fields ----------
-
     private readonly Memory<byte> buffer;
 
     private readonly ReceivedMessageType type;
@@ -15,10 +13,6 @@ internal struct ReceivedMessage
 
     private string? convertedString;
 
-    #endregion
-
-    #region ---------- Public constructors ----------
-
     public ReceivedMessage(Memory<byte> buffer, ReceivedMessageType type)
     {
         this.buffer = buffer;
@@ -26,10 +20,6 @@ internal struct ReceivedMessage
         this.convertedBytes = null;
         this.convertedString = null;
     }
-
-    #endregion
-
-    #region ---------- Public properties ----------
 
     public ReceivedMessageType Type
     {
@@ -54,6 +44,4 @@ internal struct ReceivedMessage
     {
         get => this.convertedString ??= Encoding.UTF8.GetString(this.buffer.Span);
     }
-
-    #endregion        
 }

@@ -10,6 +10,9 @@ using TcpTunnel.Utils;
 
 namespace TcpTunnel.Networking;
 
+/// <summary>
+/// An endpoint that frames messages using a 4 byte length prefix.
+/// </summary>
 internal class TcpClientFramingEndpoint : TcpClientEndpoint
 {
     private byte[]? currentReadBufferFromPool;
@@ -25,6 +28,12 @@ internal class TcpClientFramingEndpoint : TcpClientEndpoint
     {
     }
 
+    /// <summary>
+    /// Reads the complete next (framed) message, or throws if the message's size would exceed
+    /// the specified <paramref name="maxLength"/> or the stream has ended prematurely.
+    /// </summary>
+    /// <param name="maxLength"></param>
+    /// <returns></returns>
     public override async Task<ReceivedMessage?> ReceiveMessageAsync(int maxLength)
     {
         if (this.currentReadBufferFromPool is not null)

@@ -312,7 +312,7 @@ public class Gateway : IInstance
                             // AllowRenegotiation is still true by default up to .NET 6.0.
                             AllowRenegotiation = false,
                             ServerCertificate = certificate,
-                            EnabledSslProtocols = Constants.sslProtocols
+                            EnabledSslProtocols = Constants.SslProtocols
                         },
                         cancellationToken);
                 }

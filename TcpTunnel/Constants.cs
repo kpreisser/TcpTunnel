@@ -1,11 +1,11 @@
 ﻿using System;
-using System.Security.Authentication;
+using SystemSslProcotols = System.Security.Authentication.SslProtocols;
 
 namespace TcpTunnel;
 
 internal class Constants
 {
-    // Note: The initial window size is also the max windows size.
+    // Note: The initial window size is also the max window size.
     public const int InitialWindowSize = 384 * 1024;
 
     /// <summary>
@@ -18,7 +18,7 @@ internal class Constants
     // scattered packets due to too less window being available.
     public const int ReceiveBufferSize = WindowThreshold;
 
-    public const SslProtocols sslProtocols = SslProtocols.Tls12 | SslProtocols.Tls13;
+    public const SystemSslProcotols SslProtocols = SystemSslProcotols.Tls12 | SystemSslProcotols.Tls13;
 
     public const byte TypeProxyToProxyCommunication = 0x20;
 

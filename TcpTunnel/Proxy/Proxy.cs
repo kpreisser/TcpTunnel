@@ -133,10 +133,7 @@ public class Proxy : IInstance
             // First, start the listener to ensure we can actually listen on all specified ports.
             this.listener = new ProxyServerListener(
                 this.proxyServerConnectionDescriptors,
-                (connectionId, client, portAndRemoteHost) => this.AcceptProxyServerClient(
-                    connectionId,
-                    client,
-                    portAndRemoteHost));
+                this.AcceptProxyServerClient);
 
             this.listener.Start();
         }
@@ -149,15 +146,13 @@ public class Proxy : IInstance
         if (this.readTask is null)
             throw new InvalidOperationException();
 
-        if (this.listener is not null)
-            this.listener.Stop();
+        this.listener?.Stop();
 
         lock (this.syncRoot)
         {
             this.stopped = true;
 
-            if (this.tcpEndpoint is not null)
-                this.tcpEndpoint.Cancel();
+            this.tcpEndpoint?.Cancel();
         }
 
         this.readTask.Wait();
@@ -240,7 +235,8 @@ public class Proxy : IInstance
                 // Ingore, and try again.
             }
 
-            // Wait. TODO: Use a semaphore to exit faster.
+            // Wait.
+            // TODO: Use a semaphore to allow to exit faster.
             await Task.Delay(2000);
         }
     }
@@ -258,7 +254,7 @@ public class Proxy : IInstance
                     new SslClientAuthenticationOptions()
                     {
                         TargetHost = this.hostname,
-                        EnabledSslProtocols = Constants.sslProtocols,
+                        EnabledSslProtocols = Constants.SslProtocols,
                         CertificateRevocationCheckMode = X509RevocationMode.NoCheck,
                     },
                     cancellationToken);

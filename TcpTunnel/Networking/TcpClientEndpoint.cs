@@ -9,8 +9,6 @@ namespace TcpTunnel.Networking;
 
 internal class TcpClientEndpoint : Endpoint
 {
-    #region ---------- Private fields ----------
-
     private readonly Func<CancellationToken, ValueTask>? connectHandler;
 
     private readonly Action? closeHandler;
@@ -19,17 +17,9 @@ internal class TcpClientEndpoint : Endpoint
 
     private readonly TcpClient client;
 
-    #endregion
-
-    #region ---------- Private fields ----------
-
     private Stream? stream;
 
     private byte[]? currentReadBufferFromPool;
-
-    #endregion
-
-    #region ---------- Public constructors ----------
 
     public TcpClientEndpoint(
             TcpClient client,
@@ -46,14 +36,10 @@ internal class TcpClientEndpoint : Endpoint
         this.streamModifier = streamModifier;
     }
 
-    #endregion
-
     protected Stream? Stream
     {
         get => this.stream;
     }
-
-    #region ---------- Public methods ----------
 
     /// <summary>
     /// Reads at least one byte (returning as early as possible) up to the specified
@@ -110,9 +96,6 @@ internal class TcpClientEndpoint : Endpoint
             throw;
         }
     }
-    #endregion
-
-    #region ---------- Protected methods ----------
 
     protected override async ValueTask HandleInitializationAsync()
     {
@@ -181,11 +164,11 @@ internal class TcpClientEndpoint : Endpoint
         return Task.CompletedTask;
     }
 
-    // We only support binary messages.
     protected override async Task SendMessageCoreAsync(
             Memory<byte> message,
             bool textMessage)
     {
+        // We only support binary messages.
         if (textMessage)
         {
             throw new ArgumentException(
@@ -209,6 +192,4 @@ internal class TcpClientEndpoint : Endpoint
             throw;
         }
     }
-
-    #endregion
 }
