@@ -531,7 +531,20 @@ public class Proxy : IInstance
                 BinaryPrimitives.WriteInt32BigEndian(coreMessage.Span[pos..], window);
                 pos += sizeof(int);
 
-                endpoint.SendMessageByQueue(message);
+                // Send the window update with a high priority, to ensure it will be sent
+                // before data packets if the queue already contains entries. This helps
+                // to avoid a slowdown of the connection if both sides currently send data.
+                // 
+                // From the protocol side this will work because even if we are the
+                // proxy-listener which accepts TCP connections (and has to inform the
+                // partner proxy about the new connection), we can only send a window
+                // update if the partner proxy has already received the "open connection"
+                // message (as this is a prerequisite before the partner can send us data
+                // for the connection that might trigger a window update from our side),
+                // so a window update message can never be sent to the partner before
+                // sending the "open connection" message, even if it is sent with a higher
+                // priority than that message.
+                endpoint.SendMessageByQueue(message, highPriority: true);
             },
             isAbort =>
             {

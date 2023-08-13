@@ -49,6 +49,7 @@ internal abstract partial class Endpoint
     private CancellationTokenSource? cancellationTokenSource;
 
     private ConcurrentQueue<MessageQueueElement>? sendQueue;
+    private ConcurrentQueue<MessageQueueElement>? sendQueueHighPriority;
     private SemaphoreSlim? sendQueueSemaphore;
     private bool sendQueueSemaphoreIsDisposed;
 
@@ -99,7 +100,7 @@ internal abstract partial class Endpoint
     /// </summary>
     /// <remarks>
     /// This method does not block because it adds the message to
-    /// a internal queue, from which a sender thread takes the messages and calls
+    /// a internal queue, from which a sender task takes the messages and calls
     /// <see cref="SendMessageCoreAsync(Memory{byte}, bool)"/>.
     /// This method can be called from multiple threads at the same time.
     /// 
@@ -112,29 +113,39 @@ internal abstract partial class Endpoint
     /// This method can throw exceptions if the connection has been aborted.
     /// </remarks>
     /// <param name="message"></param>
+    /// <param name="highPriority">
+    /// When <c>true</c>, specifies that the element has a high priority.
+    /// Such elements will be processed by the sender task before other elements.
+    /// </param>
     /// <returns></returns>
-    public void SendMessageByQueue(string message)
+    public void SendMessageByQueue(string message, bool highPriority = false)
     {
         this.SendMessageByQueue(
                 TextMessageEncoding.GetBytes(message),
-                true);
+                true,
+                highPriority);
     }
 
-    public void SendMessageByQueue(byte[] message)
+    public void SendMessageByQueue(byte[] message, bool highPriority = false)
     {
-        this.SendMessageByQueue(message is null ? default(Memory<byte>?) : message.AsMemory(), false);
+        this.SendMessageByQueue(
+                message is null ? default(Memory<byte>?) : message.AsMemory(), 
+                false,
+                highPriority);
     }
 
-    public void SendMessageByQueue(Memory<byte>? message)
+    public void SendMessageByQueue(Memory<byte>? message, bool highPriority = false)
     {
-        this.SendMessageByQueue(message, false);
+        this.SendMessageByQueue(message, false, highPriority);
     }
 
     /// <summary>
     /// Sends a message asynchronously to the client. The returned task completes when
     /// the message has been sent completely to the client.
-    /// This method can only be called if useSendQueue is false.
     /// </summary>
+    /// <remarks>
+    /// This method can only be called if useSendQueue is false.
+    /// </remarks>
     /// <param name="message">The message to send.</param>
     public Task SendMessageAsync(string message)
     {
@@ -359,6 +370,7 @@ internal abstract partial class Endpoint
         {
             // Start a send task.
             this.sendQueue = new ConcurrentQueue<MessageQueueElement>();
+            this.sendQueueHighPriority = new ConcurrentQueue<MessageQueueElement>();
             this.sendQueueSemaphore = new SemaphoreSlim(0);
 
             // Ensure the task can see the fields.
@@ -371,7 +383,8 @@ internal abstract partial class Endpoint
 
     private void SendMessageByQueue(
             Memory<byte>? message,
-            bool textMessage)
+            bool textMessage,
+            bool highPriority)
     {
         if (!this.useSendQueue)
             throw new InvalidOperationException("Only blocking writes are supported.");
@@ -418,11 +431,14 @@ internal abstract partial class Endpoint
             if (!this.sendQueueSemaphoreIsDisposed)
             {
                 // Enqueue the message.
-                this.sendQueue!.Enqueue(new MessageQueueElement()
-                {
-                    Message = message,
-                    IsTextMessage = textMessage
-                });
+                // Elements with a high priority will be removed from the send
+                // queue before other elements.
+                (highPriority ? this.sendQueueHighPriority : this.sendQueue)!
+                    .Enqueue(new MessageQueueElement()
+                    {
+                        Message = message,
+                        IsTextMessage = textMessage
+                    });
 
                 this.sendQueueSemaphore!.Release();
             }
@@ -449,8 +465,15 @@ internal abstract partial class Endpoint
             while (true)
             {
                 await this.sendQueueSemaphore!.WaitAsync().ConfigureAwait(false);
-                if (!this.sendQueue!.TryDequeue(out var el))
-                    throw new InvalidOperationException(); // should never occur
+
+                // Process elements with a high priority first.
+                if (!this.sendQueueHighPriority!.TryDequeue(out var el))
+                {
+                    // If no element with high priority is avaiable, process the
+                    // next regular element.
+                    if (!this.sendQueue!.TryDequeue(out el))
+                        throw new InvalidOperationException(); // Should never happen
+                }
 
                 if (el.EnterFaultedState)
                     isFaulted = true;
