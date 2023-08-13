@@ -18,6 +18,10 @@ internal class Constants
     // scattered packets due to too less window being available.
     public const int ReceiveBufferSize = WindowThreshold;
 
+    // Use a smaller size (8 KiB instead of 64 KiB) for the socket's send buffer size, to reduce
+    // buffer bloat.
+    public static int SocketSendBufferSize = 8192;
+
     public const SystemSslProcotols SslProtocols = SystemSslProcotols.Tls12 | SystemSslProcotols.Tls13;
 
     public const byte TypeProxyToProxyCommunication = 0x20;

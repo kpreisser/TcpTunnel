@@ -201,6 +201,9 @@ public class Proxy : IInstance
                             // algorithm, disable delayed ACKs, and enable TCP keep-alive.
                             SocketConfigurator.ConfigureSocket(client.Client, enableKeepAlive: true);
 
+                            // Use a smaller socket send buffer size to reduce buffer bloat.
+                            client.Client.SendBufferSize = Constants.SocketSendBufferSize;
+
                             wasConnected = true;
 
                             this.logger?.Invoke(
@@ -412,6 +415,10 @@ public class Proxy : IInstance
                                     SocketConfigurator.ConfigureSocket(
                                         remoteClient.Client,
                                         enableKeepAlive: true);
+
+                                    // Additionally, use a smaller socket send buffer size to reduce
+                                    // buffer bloat.
+                                    remoteClient.Client.SendBufferSize = Constants.SocketSendBufferSize;
                                 });
                         }
                     }
@@ -636,6 +643,10 @@ public class Proxy : IInstance
         // After the socket is connected, configure it to disable the Nagle
         // algorithm, disable delayed ACKs, and enable TCP keep-alive.
         SocketConfigurator.ConfigureSocket(client.Client, enableKeepAlive: true);
+
+        // Additionally, use a smaller socket send buffer size to reduce
+        // buffer bloat.
+        client.Client.SendBufferSize = Constants.SocketSendBufferSize;
 
         lock (this.syncRoot)
         {

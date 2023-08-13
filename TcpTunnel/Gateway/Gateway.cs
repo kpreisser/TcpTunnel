@@ -192,6 +192,15 @@ public class Gateway : IInstance
                 // algorithm, disable delayed ACKs, and enable TCP keep-alive.
                 SocketConfigurator.ConfigureSocket(client.Client, enableKeepAlive: true);
 
+                // Additionally, we use a smaller send buffer (8 KiB instead of 64 KiB) to
+                // reduce buffer bloat between the proxy connections. This ensures e.g. window
+                // updates will be forwarded with a shorter latency if the network is busy.
+                // As for the receive buffer, it looks like even when we set it to a small value,
+                // Windows will still buffer a lot more data than the receive
+                // buffer size (in my tests it was about 2.5 MiB); I'm not yet sure what causes
+                // this.
+                client.Client.SendBufferSize = Constants.SocketSendBufferSize;
+
                 var remoteEndpoint = client.Client.RemoteEndPoint!;
                 this.logger?.Invoke($"Accepted connection from '{remoteEndpoint}'.");
 
