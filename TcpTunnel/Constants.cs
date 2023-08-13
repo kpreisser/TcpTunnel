@@ -18,9 +18,9 @@ internal class Constants
     // scattered packets due to too less window being available.
     public const int ReceiveBufferSize = WindowThreshold;
 
-    // Use a smaller size (8 KiB instead of 64 KiB) for the socket's send buffer size, to reduce
-    // buffer bloat.
-    public static int SocketSendBufferSize = 8192;
+    // Use a smaller size (32 KiB instead of 64 KiB) for the socket's send buffer size, to reduce
+    // buffer bloat. It should not be much smaller than the ReceiveBufferSize.
+    public static int SocketSendBufferSize = 32768;
 
     public const SystemSslProcotols SslProtocols = SystemSslProcotols.Tls12 | SystemSslProcotols.Tls13;
 
