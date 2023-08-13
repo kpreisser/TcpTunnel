@@ -356,7 +356,7 @@ public class Proxy : IInstance
 
                     // We always first need to treat this as the partner proxy
                     // being unavailable, because the gateway will send this only
-                    // once when the partner proxy is replaced.
+                    // once in case the partner proxy is replaced.
                     await this.HandlePartnerProxyUnavailableAsync(partnerProxyId ?? Constants.ProxyClientId);
 
                     if (partnerProxyAvailable)
