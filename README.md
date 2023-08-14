@@ -20,7 +20,7 @@ want to securely connect to this service from a machine on another network.
 Additionally, you have a server (e.g. VPS) with a public domain and you have a SSL certificate for it.
 
 In this case, you could use the TcpTunnel with the following configuration:
-- Run the **Gateway** on the VPS server and configure it to listen at a specific TCP port using SSL/TLS (SSL/TLS
+- Run the **Gateway** on the VPS and configure it to listen at a specific TCP port using SSL/TLS (SSL/TLS
   for the Gateway is currently only supported on **Windows**), and to allow a session with an ID and password.
 - Run the **Proxy-Client** on the machine that has access to the TCP service (VNC server) and configure it to
   connect to the host and port of the Gateway.
@@ -28,7 +28,7 @@ In this case, you could use the TcpTunnel with the following configuration:
   it to connect to the host and port of the Gateway, and to listen on a specific TCP port (like 5920) that
   should get forwarded to the Proxy-Client to a specific target host and TCP port (like localhost:5900).
 
-The following image illustrates this approach:
+The following image illustrates this scenario:
 ![](tcptunnel-illustration.png)
 
 ## Configuration
