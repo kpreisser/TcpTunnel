@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Threading;
 
 using TcpTunnel.Runner;
 using TcpTunnel.ServiceSupport;
@@ -22,11 +23,11 @@ namespace TcpTunnel
                 var runner = new TcpTunnelRunner(LogConsole);
                 runner.Start();
 
-                Console.WriteLine("Started. Press ENTER to exit.");
-                Console.ReadLine();
+                Console.WriteLine("Started. Press Ctrl+C or send a SIGTERM to exit.");
 
-                Console.WriteLine("Stopping...");
-                runner.Stop();
+                // Simply wait infinitely (until the process is terminated), as we have any form
+                // of a shutdown sequence.
+                Thread.Sleep(Timeout.Infinite);
             }
         }
     }
