@@ -1,7 +1,8 @@
 # TcpTunnel
 
 TcpTunnel is a program implemented in C# (.NET 7.0) that allows to tunnel TCP connections through a server (gateway)
-to a remote machine, for example to access services that are running behind a firewall or NAT.
+to a remote machine, for example to access services that are running behind a firewall or NAT
+(like a reverse-connect mechanism).
 
 A working configuration consists of three nodes:
 - **Gateway**: Runs on a (server) machine that is accessible for both proxy endpoints (e.g. on a public server).
