@@ -235,7 +235,7 @@ public class Proxy : IInstance
             }
             catch
             {
-                // Ingore, and try again.
+                // Ignore, and try again.
             }
 
             // Wait.

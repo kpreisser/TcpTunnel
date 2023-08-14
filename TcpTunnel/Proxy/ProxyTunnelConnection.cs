@@ -202,9 +202,11 @@ internal class ProxyTunnelConnection
 
                     try
                     {
-                        int received = await remoteClientStream.ReadAsync(
-                            receiveBuffer.AsMemory()[..Math.Min(receiveBuffer.Length, currentWindow)],
-                            this.cts.Token);
+                        // We can call the synchronous Read method without passing a CancellationToken since
+                        // it should return immediately (as we know there is data available), which should be
+                        // less expensive.
+                        int received = remoteClientStream.Read(
+                            receiveBuffer.AsSpan()[..Math.Min(receiveBuffer.Length, currentWindow)]);
 
                         if (received is 0)
                             break; // Connection has been closed.
