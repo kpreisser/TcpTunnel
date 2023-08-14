@@ -257,8 +257,7 @@ public class Proxy : IInstance
                     new SslClientAuthenticationOptions()
                     {
                         TargetHost = this.hostname,
-                        EnabledSslProtocols = Constants.SslProtocols,
-                        CertificateRevocationCheckMode = X509RevocationMode.NoCheck,
+                        EnabledSslProtocols = Constants.SslProtocols
                     },
                     cancellationToken);
             }

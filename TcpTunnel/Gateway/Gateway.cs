@@ -318,8 +318,6 @@ public class Gateway : IInstance
                     await sslStream.AuthenticateAsServerAsync(
                         new SslServerAuthenticationOptions()
                         {
-                            // AllowRenegotiation is still true by default up to .NET 6.0.
-                            AllowRenegotiation = false,
                             ServerCertificate = certificate,
                             EnabledSslProtocols = Constants.SslProtocols
                         },
