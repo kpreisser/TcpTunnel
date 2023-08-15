@@ -1,12 +1,16 @@
 ﻿using System;
+using System.Runtime.Versioning;
 using System.Security.Cryptography.X509Certificates;
 using System.Text.RegularExpressions;
 
 namespace TcpTunnel.Utils;
 
-internal class CertificateUtils
+internal partial class CertificateUtils
 {
-    private static readonly Regex filterRegex = new("[^0-9a-fA-F]+");
+    [GeneratedRegex("[^0-9a-fA-F]+")]
+    private static partial Regex MyRegex();
+
+    private static readonly Regex filterRegex = MyRegex();
 
     private static readonly StoreLocation[] storeLocations = new[] { StoreLocation.CurrentUser, StoreLocation.LocalMachine };
 
@@ -21,12 +25,12 @@ internal class CertificateUtils
     /// the fingerprint in hex format (other characters will be filtered automatically)
     /// </param>
     /// <returns></returns>
+    [SupportedOSPlatform("windows")]
     public static X509Certificate2 GetCurrentUserOrLocalMachineCertificateFromFingerprint(
         string certFingerprint)
     {
         // filter non-hex characters
         certFingerprint = filterRegex.Replace(certFingerprint, "");
-
 
         foreach (var location in storeLocations)
         {
@@ -41,7 +45,7 @@ internal class CertificateUtils
                 var resultCertificate = result[0];
 
                 if (!resultCertificate.HasPrivateKey)
-                    throw new System.Exception("Certificate doesn't have a private key.");
+                    throw new Exception("Certificate doesn't have a private key.");
 
                 return resultCertificate;
             }

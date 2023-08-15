@@ -1,7 +1,7 @@
 ﻿<Settings xmlns="https://github.com/kpreisser/TcpTunnel">
     <!-- A 'Proxy-Client' instance connects to the 'Gateway', and waits for forwarded TCP
          connections by the 'Proxy-Server' which it will then forward to the destination. -->
-  <Instance type="proxy-client" host="localhost" port="23654" useSsl="1">
+  <Instance type="proxy-client" host="localhost" port="25201" useSsl="1">
     <!-- You can specify only one Session here. -->
     <Session id="123" password="my_secret_password_client" />
   </Instance>

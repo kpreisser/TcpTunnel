@@ -21,8 +21,8 @@ want to securely connect to this service from a machine on another network.
 Additionally, you have a server (e.g. VPS) with a public domain and you have a SSL certificate for it.
 
 In this case, you could use the TcpTunnel with the following configuration:
-- Run the **Gateway** on the VPS and configure it to listen at a specific TCP port using SSL/TLS (SSL/TLS
-  for the Gateway is currently only supported on **Windows**), and to allow a session with an ID and password.
+- Run the **Gateway** on the VPS and configure it to listen at a specific TCP port using SSL/TLS, and to
+  allow a session with an ID and password.
 - Run the **Proxy-Client** on the machine that has access to the TCP service (VNC server) and configure it to
   connect to the host and port of the Gateway.
 - Run the **Proxy-Server** on your machine where you want to access the TCP service (VNC server), and configure
@@ -33,16 +33,19 @@ The following image illustrates this scenario:
 ![](tcptunnel-illustration.png)
 
 ## Configuration
+
 The TcpTunnel is configured via an XML file with the name `settings.xml` in the application's directory.
 When building the application, sample setting files will get copied to the output directory which you can
 use as a template.
 
-## Features:
+## Features
+
 - Uses async I/O for high scalability.
-- Supports SSL/TLS (currently on Windows only) and password authentication for the gateway connections.
-- Multiplexes multiple (tunneled) TCP connections over a single connection.
-- Uses a window for flow control for tunneled TCP connections.
-- Automatically recovers when one of the nodes (*Gateway*, *Proxy-Server*, *Proxy-Client*) was temporarily unavailable.
+- Supports SSL/TLS and password authentication for the connections from the Proxies to the Gateway.
+- Multiplexes multiple (tunneled) TCP connections over a single connection, similar to the stream concept in HTTP/2.
+- Uses flow control for the tunneled TCP connections (using a initial window size of 384 KiB), similar
+  to the flow control mechanism used in HTTP/2.
+- Automatically recovers after one of the nodes (*Gateway*, *Proxy-Server*, *Proxy-Client*) was temporarily unavailable.
 - On Windows, it can be installed as service.
 
 ## Building:
@@ -54,8 +57,8 @@ use as a template.
   dotnet publish "TcpTunnel/TcpTunnel.csproj" -f net7.0 -c Release -p:PublishSingleFile=true --no-self-contained
   ```
 
-## Development TODOs:
-- Support SSL/TLS certificates from a certificate file (.pfx), so that it can be used with the gateway under Linux.
+## Possible Development TODOs
+
 - Use a different password storage mechanism so that they don't have to be specified in cleartext in the
   XML settings file.
 - Add more documentation.

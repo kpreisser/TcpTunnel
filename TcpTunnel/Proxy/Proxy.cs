@@ -160,7 +160,9 @@ public class Proxy : IInstance
 
     private async Task RunReadTaskAsync()
     {
-        this.logger?.Invoke($"Connecting...");
+        this.logger?.Invoke($"Connecting to gateway...");
+
+        string? lastConnectionError = null;
 
         while (true)
         {
@@ -175,6 +177,7 @@ public class Proxy : IInstance
                 var client = new TcpClient();
 
                 bool wasConnected = false;
+                var caughtException = default(Exception);
                 try
                 {
                     var tcpEndpoint = default(TcpClientFramingEndpoint);
@@ -195,6 +198,9 @@ public class Proxy : IInstance
                                 this.tcpEndpoint = tcpEndpoint!;
                             }
 
+                            // Note: We will log the "Connected" message in the stream modifier
+                            // callback, because only after that the connection can considered
+                            // to be fully established.
                             await client.ConnectAsync(this.hostname, this.port, cancellationToken);
 
                             // After the socket is connected, configure it to disable the Nagle
@@ -203,14 +209,6 @@ public class Proxy : IInstance
 
                             // Use a smaller socket send buffer size to reduce buffer bloat.
                             client.Client.SendBufferSize = Constants.SocketSendBufferSize;
-
-                            wasConnected = true;
-
-                            this.logger?.Invoke(
-                                $"Connection established to gateway " +
-                                $"'{this.hostname}:{this.port.ToString(CultureInfo.InvariantCulture)}'. " +
-                                $"Authenticating for Session ID '{this.sessionId.ToString(CultureInfo.InvariantCulture)}' " +
-                                $"({(this.proxyServerConnectionDescriptors is not null ? "proxy-server" : "proxy-client")})...");
                         },
                         closeHandler: () =>
                         {
@@ -221,16 +219,63 @@ public class Proxy : IInstance
                                 this.tcpEndpoint = null;
                             }
                         },
-                        streamModifier: this.ModifyStreamAsync);
+                        streamModifier: async (networkStream, cancellationToken) =>
+                        {
+                            var modifiedStream = default(Stream);
+
+                            if (this.useSsl)
+                            {
+                                var sslStream = new SslStream(networkStream);
+                                try
+                                {
+                                    await sslStream.AuthenticateAsClientAsync(
+                                        new SslClientAuthenticationOptions()
+                                        {
+                                            TargetHost = this.hostname,
+                                            EnabledSslProtocols = Constants.SslProtocols
+                                        },
+                                        cancellationToken);
+                                }
+                                catch
+                                {
+                                    await sslStream.DisposeAsync();
+                                    throw;
+                                }
+
+                                modifiedStream = sslStream;
+                            }
+
+                            wasConnected = true;
+                            this.logger?.Invoke(
+                                $"Connection established to gateway " +
+                                $"'{this.hostname}:{this.port.ToString(CultureInfo.InvariantCulture)}'. " +
+                                $"Authenticating for Session ID '{this.sessionId.ToString(CultureInfo.InvariantCulture)}' " +
+                                $"({(this.proxyServerConnectionDescriptors is not null ? "proxy-server" : "proxy-client")})...");
+
+                            return modifiedStream;
+                        });
 
                     await tcpEndpoint.RunEndpointAsync(() => this.RunEndpointAsync(tcpEndpoint));
+                }
+                catch (Exception ex)
+                {
+                    caughtException = ex;
+                    throw;
                 }
                 finally
                 {
                     client.Dispose();
 
+                    // Log the error if we lost connection, or if we couldn't connect and this
+                    // is a new error.
+                    string newConnectionError = caughtException?.Message ?? "Peer closed connection.";
+
                     if (wasConnected)
-                        this.logger?.Invoke($"Connection to gateway lost. Reconnecting...");
+                        this.logger?.Invoke($"Connection to gateway lost ({newConnectionError}). Reconnecting...");
+                    else if (newConnectionError != lastConnectionError)
+                        this.logger?.Invoke($"Unable to connect to gateway ({newConnectionError}). Trying again...");
+
+                    lastConnectionError = newConnectionError;
                 }
             }
             catch
@@ -238,39 +283,10 @@ public class Proxy : IInstance
                 // Ignore, and try again.
             }
 
-            // Wait.
+            // Wait a bit.
             // TODO: Use a semaphore to allow to exit faster.
-            await Task.Delay(2000);
+            await Task.Delay(1000);
         }
-    }
-
-    private async ValueTask<Stream?> ModifyStreamAsync(
-        NetworkStream networkStream,
-        CancellationToken cancellationToken)
-    {
-        if (this.useSsl)
-        {
-            var sslStream = new SslStream(networkStream);
-            try
-            {
-                await sslStream.AuthenticateAsClientAsync(
-                    new SslClientAuthenticationOptions()
-                    {
-                        TargetHost = this.hostname,
-                        EnabledSslProtocols = Constants.SslProtocols
-                    },
-                    cancellationToken);
-            }
-            catch
-            {
-                await sslStream.DisposeAsync();
-                throw;
-            }
-
-            return sslStream;
-        }
-
-        return null;
     }
 
     private async Task RunPingTaskAsync(

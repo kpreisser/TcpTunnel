@@ -73,13 +73,45 @@ namespace TcpTunnel.Runner
                                     throw new InvalidDataException("Missing attribute 'port'."),
                                 CultureInfo.InvariantCulture);
 
+                            // Check if we need to use SSL/TLS.
                             string? certificateThumbprint = listenerElement.Attribute("certificateHash")?.Value;
+
+                            string? certificatePfxFilePath = listenerElement.Attribute("certificatePfxFilePath")?.Value;
+                            string? certificatePfxPassword = listenerElement.Attribute("certificatePfxPassword")?.Value;
+
+                            string? certificatePemFilePath = listenerElement.Attribute("certificatePemFilePath")?.Value;
+                            string? certificatePemKeyFilePath = listenerElement.Attribute("certificatePemKeyFilePath")?.Value;
+
                             var certificate = default(X509Certificate2);
 
-                            if (!string.IsNullOrEmpty(certificateThumbprint))
+                            if (certificateThumbprint is not null)
                             {
+                                if (!OperatingSystem.IsWindows())
+                                    throw new PlatformNotSupportedException(
+                                        "Getting a certificate from the Windows Certificate Store is only " +
+                                        "supported on Windows.");
+
+                                // Get the certificate
                                 certificate = CertificateUtils.GetCurrentUserOrLocalMachineCertificateFromFingerprint(
                                     certificateThumbprint);
+                            }
+                            else if (certificatePfxFilePath is not null)
+                            {
+                                // Load the certificate from a PFX file.
+                                certificate = new X509Certificate2(certificatePfxFilePath, certificatePfxPassword);
+
+                                if (!certificate.HasPrivateKey)
+                                    throw new Exception("Certificate doesn't have a private key.");
+                            }
+                            else if (certificatePemFilePath is not null)
+                            {
+                                if (certificatePemKeyFilePath is null)
+                                    throw new ArgumentException("The 'certificatePemKeyFilePath' attribute needs to be specified.");
+
+                                certificate = X509Certificate2.CreateFromPemFile(certificatePemFilePath, certificatePemKeyFilePath);
+
+                                if (!certificate.HasPrivateKey)
+                                    throw new Exception("Certificate doesn't have a private key.");
                             }
 
                             listenerEntries.Add((ip, port, certificate));

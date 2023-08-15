@@ -3,16 +3,32 @@
        connections from both the 'Proxy-Server' and the 'Proxy-Client' instances. -->
   <Instance type="gateway">
     <!-- You can define multiple listeners. -->
-    <!-- 'certificateHash' is specified when using SSL/TLS, or omitted when not using SSL/TLS. 
-         When specified, it contains the hash of an SSL/TLS certificate used from the Windows Certificate Store.
+    <!-- Note: 'ip' is optional -->
+    <Listener ip="127.0.0.20" port="25200"/>
+
+    <!-- Specify one of 'certificateHash', 'certificatePfxFilePath', or 'certificatePemFilePath' attributes
+         in order to use SSL/TLS. 
+    
+         On Windows, you can specify the 'certificateHash' attribute containing the hash of an SSL/TLS 
+         certificate used from the Windows Certificate Store.
          The cert needs to be stored in the current user's or the local machine's "My" certificate store, and
          you need to be able to access the private key (i.e. you probably need to run the app as administrator
-         when the cert is stored in the local machine store).  -->
-    <!-- Note: 'ip' is optional -->
-    <Listener port="23654" certificateHash="0000000000000000000000000000000000000000" />
-    <Listener ip="127.0.0.20" port="23654" />
+         when the cert is stored in the local machine store).
+        
+         Alternatively, or if running on other OSes like Linux, you can specify the 'certificatePfxFilePath' 
+         attribute containing a file path of a .pfx (PKCS #12) file that contains the SSL/TLS certificate
+         (and optionally the pfx password with the 'certificatePfxPassword' attribute); or you can specify
+         the 'certificatePemFilePath' and 'certificatePemKeyFilePath' attributes to load a certificate from
+         PEM files.
+         (Note: Using PEM files currently doesn't always seem to work on Windows; in that case use a .pfx
+         file.)
+         
+         If none of the certificate* attributes are specified, SSL/TLS is not used. -->
+    <Listener port="25201" certificateHash="0000000000000000000000000000000000000000" />
+    <Listener port="25202" certificatePfxFilePath="my-cert.pfx" certificatePfxPassword="pfx-password" />
+    <Listener port="25203" certificatePemFilePath="my-cert.pem" certificatePemKeyFilePath="my-private-key.pem" />
     
-    <!-- Specify one or more sessions. Note that for each session, multiple proxy-server clients can connect,
+    <!-- Specify one or more sessions. Note that for each session, multiple proxy-servers can connect,
          but only a single proxy-client can connect. -->
     <Session id="123" proxyClientPassword="my_secret_password_client" proxyServerPassword="my_secret_password_server" />
     <Session id="124" proxyClientPassword="my_other_password_client" proxyServerPassword="my_other_password_server" />
