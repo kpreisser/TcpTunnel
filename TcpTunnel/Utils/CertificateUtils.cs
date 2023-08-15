@@ -1,17 +1,11 @@
 ﻿using System;
 using System.Runtime.Versioning;
 using System.Security.Cryptography.X509Certificates;
-using System.Text.RegularExpressions;
 
 namespace TcpTunnel.Utils;
 
-internal partial class CertificateUtils
+internal class CertificateUtils
 {
-    [GeneratedRegex("[^0-9a-fA-F]+")]
-    private static partial Regex MyRegex();
-
-    private static readonly Regex filterRegex = MyRegex();
-
     private static readonly StoreLocation[] storeLocations = new[] { StoreLocation.CurrentUser, StoreLocation.LocalMachine };
 
     /// <summary>
@@ -29,9 +23,6 @@ internal partial class CertificateUtils
     public static X509Certificate2 GetCurrentUserOrLocalMachineCertificateFromFingerprint(
         string certFingerprint)
     {
-        // filter non-hex characters
-        certFingerprint = filterRegex.Replace(certFingerprint, "");
-
         foreach (var location in storeLocations)
         {
             using var store = new X509Store(StoreName.My, location);
@@ -40,7 +31,7 @@ internal partial class CertificateUtils
             // TODO: Dispose the other certificates.
             var result = store.Certificates.Find(X509FindType.FindByThumbprint, certFingerprint, false);
 
-            if (result.Count is not 0)
+            if (result.Count > 0)
             {
                 var resultCertificate = result[0];
 

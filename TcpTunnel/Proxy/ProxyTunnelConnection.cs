@@ -109,7 +109,8 @@ internal class ProxyTunnelConnection
                 return;
 
             // Verify that the data to be queued doesn't exceed the available
-            // transmit window. Otherwise, the partner proxy would be malicious.
+            // transmit window. Otherwise, the partner proxy wouldn't work
+            // correctly or might be malicious.
             if (data.Length > this.transmitWindowAvailable)
                 throw new InvalidOperationException();
 

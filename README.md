@@ -48,7 +48,23 @@ use as a template.
 - Automatically recovers after one of the nodes (*Gateway*, *Proxy-Server*, *Proxy-Client*) was temporarily unavailable.
 - On Windows, it can be installed as service.
 
-## Building:
+## Security Considerations
+
+- The Gateway can define one or more password-protected *sessions* (which associate a
+  Proxy-Client with one or more Proxy-Servers). In combination with enabling SSL/TLS in the Gateway and
+  the Proxies, this ensures the connections between the Proxies and the Gateway are secure, and only the
+  intended Proxies can connect to each other.
+- You can specify different passwords for the Proxy-Client and the Proxy-Server(s) in the Gateway
+  configuration. Additionally, it's possible to restrict the possible target endpoints (host and port)
+  accepted by the Proxy-Client when receiving a forwarded connection from the Proxy-Server.<br>
+  This allows the Proxy-Server and the Proxy-Client to operate at different trust levels, e.g. if you
+  want to share the Proxy-Server to other people but want to allow them to only be able to connect to
+  specific target endpoints.
+- There are currently no DoS protection mechanisms implemented, e.g. to limit the number of received
+  forwarded connections.
+
+## Building
+
 - Install the [.NET 7.0 SDK](https://dotnet.microsoft.com/download) or higher.
 - On Windows, you can use one of the `PUBLISH-xyz.cmd` files to publish the app, either as self-contained app
   (with native AOT compilation), or as framework-dependent app (so it needs the .NET Runtime to be installed).

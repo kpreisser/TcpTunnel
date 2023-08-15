@@ -7,7 +7,6 @@ using System.IO;
 using System.Linq;
 using System.Net.Security;
 using System.Net.Sockets;
-using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -33,21 +32,32 @@ public class Proxy : IInstance
     // be more than enough.
     public const int MaxReceiveMessageSize = 512 * 1024;
 
+    private const int ProxyMessageTypeOpenConnection = 0x00;
+    private const int ProxyMessageTypeData = 0x01;
+    private const int ProxyMessageTypeAbortConnection = 0x02;
+    private const int ProxyMessageTypeUpdateWindow = 0x03;
+
     private readonly object syncRoot = new();
 
-    private readonly string hostname;
-    private readonly int port;
-    private readonly bool useSsl;
+    private readonly string gatewayHost;
+    private readonly int gatewayPort;
+    private readonly bool gatewayUseSsl;
     private readonly int sessionId;
     private readonly ReadOnlyMemory<byte> sessionPasswordBytes;
 
     private readonly Action<string>? logger;
 
     /// <summary>
-    /// If this proxy is a proxy-server, contains the connection descriptors
-    /// for which <see cref="TcpListener"/>s are created.
+    /// If not <c>null</c>, the current instance is a proxy-server and this list contains
+    /// the connection descriptors for which <see cref="TcpListener"/>s are created.
     /// </summary>
     private readonly IReadOnlyList<ProxyServerConnectionDescriptor>? proxyServerConnectionDescriptors;
+
+    /// <summary>
+    /// If not <c>null</c> and the current instance is a proxy-client, contains target endpoints
+    /// which are allowed. Otherwise, if this is <c>null</c>, all target endpoints are allowed.
+    /// </summary>
+    private readonly IReadOnlyList<(string host, int port)>? proxyClientAllowedTargetEndpoints;
 
     private Task? readTask;
     private TcpClientFramingEndpoint? tcpEndpoint;
@@ -62,20 +72,22 @@ public class Proxy : IInstance
         Dictionary<long /* connectionId */, ProxyTunnelConnection>> activePartnerProxiesAndConnections = new();
 
     public Proxy(
-        string hostname,
-        int port,
-        bool useSsl,
+        string gatewayHost,
+        int gatewayPort,
+        bool gatewayUseSsl,
         int sessionId,
         ReadOnlyMemory<byte> sessionPasswordBytes,
         IReadOnlyList<ProxyServerConnectionDescriptor>? proxyServerConnectionDescriptors,
+        IReadOnlyList<(string host, int port)>? proxyClientAllowedTargetEndpoints,
         Action<string>? logger = null)
     {
-        this.hostname = hostname;
-        this.port = port;
-        this.useSsl = useSsl;
+        this.gatewayHost = gatewayHost;
+        this.gatewayPort = gatewayPort;
+        this.gatewayUseSsl = gatewayUseSsl;
         this.sessionId = sessionId;
         this.sessionPasswordBytes = sessionPasswordBytes;
         this.proxyServerConnectionDescriptors = proxyServerConnectionDescriptors;
+        this.proxyClientAllowedTargetEndpoints = proxyClientAllowedTargetEndpoints;
         this.logger = logger;
     }
 
@@ -201,7 +213,7 @@ public class Proxy : IInstance
                             // Note: We will log the "Connected" message in the stream modifier
                             // callback, because only after that the connection can considered
                             // to be fully established.
-                            await client.ConnectAsync(this.hostname, this.port, cancellationToken);
+                            await client.ConnectAsync(this.gatewayHost, this.gatewayPort, cancellationToken);
 
                             // After the socket is connected, configure it to disable the Nagle
                             // algorithm, disable delayed ACKs, and enable TCP keep-alive.
@@ -223,7 +235,7 @@ public class Proxy : IInstance
                         {
                             var modifiedStream = default(Stream);
 
-                            if (this.useSsl)
+                            if (this.gatewayUseSsl)
                             {
                                 var sslStream = new SslStream(networkStream);
                                 try
@@ -231,7 +243,7 @@ public class Proxy : IInstance
                                     await sslStream.AuthenticateAsClientAsync(
                                         new SslClientAuthenticationOptions()
                                         {
-                                            TargetHost = this.hostname,
+                                            TargetHost = this.gatewayHost,
                                             EnabledSslProtocols = Constants.SslProtocols
                                         },
                                         cancellationToken);
@@ -248,7 +260,7 @@ public class Proxy : IInstance
                             wasConnected = true;
                             this.logger?.Invoke(
                                 $"Connection established to gateway " +
-                                $"'{this.hostname}:{this.port.ToString(CultureInfo.InvariantCulture)}'. " +
+                                $"'{this.gatewayHost}:{this.gatewayPort.ToString(CultureInfo.InvariantCulture)}'. " +
                                 $"Authenticating for Session ID '{this.sessionId.ToString(CultureInfo.InvariantCulture)}' " +
                                 $"({(this.proxyServerConnectionDescriptors is not null ? "proxy-server" : "proxy-client")})...");
 
@@ -401,7 +413,7 @@ public class Proxy : IInstance
                     coreMessage = coreMessage[sizeof(long)..];
 
                     if (coreMessage.Length >= +1 + sizeof(int) &&
-                        coreMessage.Span[0] is 0x00 &&
+                        coreMessage.Span[0] is ProxyMessageTypeOpenConnection &&
                         isProxyClient)
                     {
                         // Open a new connection, if we are the proxy-client.
@@ -411,30 +423,53 @@ public class Proxy : IInstance
                         string hostname = Encoding.UTF8.GetString(
                             coreMessage.Span[(1 + sizeof(int))..]);
 
-                        var remoteClient = new TcpClient();
-
-                        lock (this.syncRoot)
+                        // If the proxyClientAllowedTargetEndpoints list is specified, we need
+                        // to check whether the target endpoint is allowed. Otherwise, we abort
+                        // the connection.
+                        if (this.proxyClientAllowedTargetEndpoints is not null &&
+                            !this.proxyClientAllowedTargetEndpoints.Contains((hostname, port)))
                         {
-                            this.StartTcpTunnelConnection(
-                                endpoint,
-                                partnerProxyId,
-                                activeConnections,
-                                connectionId,
-                                remoteClient,
-                                async cancellationToken =>
-                                {
-                                    await remoteClient.ConnectAsync(hostname, port, cancellationToken);
+                            // Notify the partner that the connection had to be aborted.
+                            int length = sizeof(long) + 1;
 
-                                    // After the socket is connected, configure it to disable the Nagle
-                                    // algorithm, disable delayed ACKs, and enable TCP keep-alive.
-                                    SocketConfigurator.ConfigureSocket(
-                                        remoteClient.Client,
-                                        enableKeepAlive: true);
+                            var (messageToSend, coreMessageToSend) = PreparePartnerProxyMessage(
+                                length,
+                                partnerProxyId);
 
-                                    // Additionally, use a smaller socket send buffer size to reduce
-                                    // buffer bloat.
-                                    remoteClient.Client.SendBufferSize = Constants.SocketSendBufferSize;
-                                });
+                            BinaryPrimitives.WriteInt64BigEndian(coreMessageToSend.Span, connectionId);
+                            int pos = sizeof(long);
+
+                            coreMessageToSend.Span[pos++] = ProxyMessageTypeAbortConnection;
+
+                            endpoint.SendMessageByQueue(messageToSend);
+                        }
+                        else
+                        {
+                            var remoteClient = new TcpClient();
+
+                            lock (this.syncRoot)
+                            {
+                                this.StartTcpTunnelConnection(
+                                    endpoint,
+                                    partnerProxyId,
+                                    activeConnections,
+                                    connectionId,
+                                    remoteClient,
+                                    async cancellationToken =>
+                                    {
+                                        await remoteClient.ConnectAsync(hostname, port, cancellationToken);
+
+                                        // After the socket is connected, configure it to disable the Nagle
+                                        // algorithm, disable delayed ACKs, and enable TCP keep-alive.
+                                        SocketConfigurator.ConfigureSocket(
+                                            remoteClient.Client,
+                                            enableKeepAlive: true);
+
+                                        // Additionally, use a smaller socket send buffer size to reduce
+                                        // buffer bloat.
+                                        remoteClient.Client.SendBufferSize = Constants.SocketSendBufferSize;
+                                    });
+                            }
                         }
                     }
                     else
@@ -450,7 +485,7 @@ public class Proxy : IInstance
                         if (connection is not null)
                         {
                             if (coreMessage.Length >= 1 &&
-                                coreMessage.Span[0] is 0x01)
+                                coreMessage.Span[0] is ProxyMessageTypeData)
                             {
                                 // Transmit the data packet (or shutdown the connection if
                                 // the length is 0).
@@ -474,15 +509,19 @@ public class Proxy : IInstance
                                 }
                             }
                             else if (coreMessage.Length >= 1 &&
-                                coreMessage.Span[0] is 0x02)
+                                coreMessage.Span[0] is ProxyMessageTypeAbortConnection)
                             {
                                 // Abort the connection, which will reset it immediately. We
                                 // use StopAsync() to ensure the connection is removed from
                                 // the list of active connections before we continue.
+                                // Note: This will cause us to send another abort message to
+                                // the partner proxy when the connectionFinishedHandler runs,
+                                // even though this actually wouldn't be necessary since the
+                                // partner sent the abort message in the first place.
                                 await connection.StopAsync();
                             }
                             else if (coreMessage.Length >= 1 + sizeof(int) &&
-                                coreMessage.Span[0] is 0x03)
+                                coreMessage.Span[0] is ProxyMessageTypeUpdateWindow)
                             {
                                 // Update the receive window size.
                                 int windowSize = BinaryPrimitives.ReadInt32BigEndian(
@@ -531,7 +570,7 @@ public class Proxy : IInstance
                 BinaryPrimitives.WriteInt64BigEndian(coreMessage.Span, connectionId);
                 int pos = sizeof(long);
 
-                coreMessage.Span[pos++] = 0x01;
+                coreMessage.Span[pos++] = ProxyMessageTypeData;
                 receiveBuffer.CopyTo(coreMessage[pos..]);
                 pos += receiveBuffer.Length;
 
@@ -549,7 +588,7 @@ public class Proxy : IInstance
                 BinaryPrimitives.WriteInt64BigEndian(coreMessage.Span, connectionId);
                 int pos = sizeof(long);
 
-                coreMessage.Span[pos++] = 0x03;
+                coreMessage.Span[pos++] = ProxyMessageTypeUpdateWindow;
                 BinaryPrimitives.WriteInt32BigEndian(coreMessage.Span[pos..], window);
                 pos += sizeof(int);
 
@@ -570,19 +609,11 @@ public class Proxy : IInstance
             },
             isAbort =>
             {
-                lock (this.syncRoot)
-                {
-                    // The connection is finished, so remove it. Note that the receiveTask
-                    // is still running (we are being called from it, so we can't wait for
-                    // it by calling StopAsync()), but at this stage the connection is
-                    // considered to be finished and it doesn't have any more resources open,
-                    // so it is OK to just remove it.
-                    activeConnections.Remove(connectionId);
-                }
-
                 if (isAbort)
                 {
                     // Notify the partner that the connection was aborted.
+                    // This must be done before removing the connection from the `activeConnections`
+                    // dictionary; see comment below.
                     int length = sizeof(long) + 1;
 
                     var (message, coreMessage) = PreparePartnerProxyMessage(
@@ -592,9 +623,21 @@ public class Proxy : IInstance
                     BinaryPrimitives.WriteInt64BigEndian(coreMessage.Span, connectionId);
                     int pos = sizeof(long);
 
-                    coreMessage.Span[pos++] = 0x02;
+                    coreMessage.Span[pos++] = ProxyMessageTypeAbortConnection;
 
                     endpoint.SendMessageByQueue(message);
+                }
+
+                lock (this.syncRoot)
+                {
+                    // The connection is finished, so remove it. After removing it, we mustn't
+                    // call the `Endpoint.SendMessageByQueue()` method again, because the endpoint
+                    // may already have stopped (and so calling that method would throw).
+                    // Note that the receiveTask is still running (we are being called from it,
+                    // so we can't wait for it by calling `StopAsync()`), but at this stage the
+                    // connection is considered to be finished and it doesn't have any more
+                    // resources open, so it is OK to just remove it.
+                    activeConnections.Remove(connectionId);
                 }
             });
 
@@ -697,7 +740,7 @@ public class Proxy : IInstance
             var (message, coreMessage) = PreparePartnerProxyMessage(responseLength, null);
 
             BinaryPrimitives.WriteInt64BigEndian(coreMessage.Span, connectionId);
-            coreMessage.Span[sizeof(long)] = 0x00;
+            coreMessage.Span[sizeof(long)] = ProxyMessageTypeOpenConnection;
 
             BinaryPrimitives.WriteInt32BigEndian(
                 coreMessage.Span[(sizeof(long) + 1)..],

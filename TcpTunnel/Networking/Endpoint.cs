@@ -129,7 +129,7 @@ internal abstract partial class Endpoint
     public void SendMessageByQueue(byte[] message, bool highPriority = false)
     {
         this.SendMessageByQueue(
-                message is null ? default(Memory<byte>?) : message.AsMemory(), 
+                message is null ? default(Memory<byte>?) : message.AsMemory(),
                 false,
                 highPriority);
     }
@@ -211,8 +211,8 @@ internal abstract partial class Endpoint
     /// Runs this endpoint asynchronously.
     /// </summary>
     /// <remarks>
-    /// You may call <see cref="SendMessageByQueue(byte[])"/> only once the
-    /// <paramref name="runCallback"/> is called.
+    /// You may call <see cref="SendMessageByQueue(byte[], bool)"/> (and other overloads)
+    /// only while the <paramref name="runCallback"/> is executing.
     /// </remarks>
     /// <param name="runCallback"></param>
     /// <param name="cancellationToken"></param>
@@ -262,7 +262,13 @@ internal abstract partial class Endpoint
                     IsQueueEndElement = true
                 });
 
-                this.sendQueueSemaphore!.Release();
+                // Need to lock to ensure the sender task doesn't dispose the
+                // semaphore while we might still be in the Release() call.
+                lock (this.sendQueueSemaphoreSyncRoot)
+                {
+                    if (!this.sendQueueSemaphoreIsDisposed)
+                        this.sendQueueSemaphore!.Release();
+                }
 
                 // Wait for the send task to complete. We wait asynchronously
                 // because it could take some time (if it takes too long, the
@@ -272,7 +278,6 @@ internal abstract partial class Endpoint
                 // we would block the thread pool (as we are ourselves an async
                 // method running in a thread pool thread).
                 await this.sendQueueWorkerTask.ConfigureAwait(false);
-                this.sendQueueWorkerTask.Dispose();
                 this.sendQueueWorkerTask = null;
             }
 
@@ -284,7 +289,6 @@ internal abstract partial class Endpoint
 
                 // Asynchronously wait for the task to finish. See comment above.
                 await this.pingTimerTask!.ConfigureAwait(false);
-                this.pingTimerTask.Dispose();
                 this.pingTimerTask = null;
                 this.pingTimerSemaphore.Dispose();
                 this.pingTimerSemaphore = null;
@@ -389,7 +393,10 @@ internal abstract partial class Endpoint
         if (!this.useSendQueue)
             throw new InvalidOperationException("Only blocking writes are supported.");
         if (this.sendQueueWorkerTask is null)
-            throw new InvalidOperationException("Endpoint has not yet been initialized.");
+            throw new InvalidOperationException(
+                "Endpoint has not yet been initialized or has already stopped. " +
+                $"You may call this method only while the callback passed to " +
+                $"{nameof(RunEndpointAsync)} is executing.");
 
         // If the size of queued messages was not too large, add the message to the queue.
         // Note: If this method is called again, the length of the next message will be

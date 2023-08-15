@@ -20,8 +20,8 @@ namespace TestGateway
                 {
                     (null, port, null)
                 },
-                new Dictionary<int, (string proxyClientPassword, string proxyServerPassword)>() { 
-                    { 15, ( "testClientPasswort", "testServerPassword") } 
+                new Dictionary<int, (string proxyClientPassword, string proxyServerPassword)>() {
+                    { 15, ( "testClientPasswort", "testServerPassword") }
                 },
                 LogConsole);
 

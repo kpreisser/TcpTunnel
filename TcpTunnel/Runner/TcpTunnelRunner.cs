@@ -180,6 +180,7 @@ namespace TcpTunnel.Runner
                             throw new InvalidDataException("Missing attribute 'password'.");
 
                         var descriptors = default(List<ProxyServerConnectionDescriptor>);
+                        var allowedTargetEndpoints = default(List<(string host, int port)>);
 
                         if (isProxyListener)
                         {
@@ -211,6 +212,25 @@ namespace TcpTunnel.Runner
                                     targetPort));
                             }
                         }
+                        else
+                        {
+                            var allowedTargetEndpointsElement = instanceElement.Element(xmlNamespace + "AllowedTargetEndpoints");
+
+                            if (allowedTargetEndpointsElement is not null)
+                            {
+                                allowedTargetEndpoints = new List<(string host, int port)>();
+
+                                foreach (var endpointElement in allowedTargetEndpointsElement.Elements(xmlNamespace + "Endpoint"))
+                                {
+                                    string endpointHost = endpointElement.Attribute("host")?.Value ??
+                                        throw new InvalidDataException("Missing attribute 'host'.");
+                                    string endpointPort = endpointElement.Attribute("port")?.Value ??
+                                        throw new InvalidDataException("Missing attribute 'port'.");
+
+                                    allowedTargetEndpoints.Add((endpointHost, int.Parse(endpointPort, CultureInfo.InvariantCulture)));
+                                }
+                            }
+                        }
 
                         var client = new Proxy.Proxy(
                             host,
@@ -219,6 +239,7 @@ namespace TcpTunnel.Runner
                             sessionId,
                             Encoding.UTF8.GetBytes(password),
                             descriptors,
+                            allowedTargetEndpoints,
                             this.logger);
 
                         client.Start();

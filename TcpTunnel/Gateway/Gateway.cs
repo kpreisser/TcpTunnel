@@ -147,7 +147,7 @@ public class Gateway : IInstance
         {
             // Wait for the listener task to finish.
             task.GetAwaiter().GetResult();
-           
+
             // Dispose of the TcpListener.
             listener.Stop();
         }

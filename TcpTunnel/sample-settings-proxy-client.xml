@@ -4,5 +4,17 @@
   <Instance type="proxy-client" host="localhost" port="25201" useSsl="1">
     <!-- You can specify only one Session here. -->
     <Session id="123" password="my_secret_password_client" />
+
+    <!-- When the 'AllowedTargetEndpoints' element is specified, only the target endpoints
+         (host and port) specified in its 'Endpoint' child elements are allowed when
+         receiving a forwarded connection from the proxy-server. If the element is not
+         specified, all target hosts are allowed.
+         
+         This allows to restrict the target endpoints e.g. if the proxy-server is operating
+         at a different trust level than the proxy-client. -->
+    <AllowedTargetEndpoints>
+      <Endpoint host="www.google.com" port="80" />
+      <Endpoint host="whois.ripe.net" port="43" />
+    </AllowedTargetEndpoints>
   </Instance>
 </Settings>

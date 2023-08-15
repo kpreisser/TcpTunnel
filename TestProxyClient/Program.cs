@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Text;
 
 using TcpTunnel.Proxy;
@@ -11,7 +12,23 @@ namespace TestProxyClient
         {
             static void LogConsole(string s) => Console.WriteLine(s);
 
-            var firstClient = new Proxy("localhost", 23654, false, 15, Encoding.UTF8.GetBytes("testClientPasswort"), null, LogConsole);
+            // Restrict the target endpoints.
+            var allowedTargetEndpoints = new List<(string host, int port)>
+            {
+                ("www.google.com", 80),
+                ("whois.ripe.net", 43)
+            };
+
+            var firstClient = new Proxy(
+                gatewayHost: "localhost",
+                gatewayPort: 23654,
+                gatewayUseSsl: false,
+                sessionId: 15,
+                sessionPasswordBytes: Encoding.UTF8.GetBytes("testClientPasswort"),
+                proxyServerConnectionDescriptors: null,
+                proxyClientAllowedTargetEndpoints: allowedTargetEndpoints,
+                logger: LogConsole);
+
             firstClient.Start();
 
             Console.WriteLine($"Proxy-Client started.");

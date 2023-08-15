@@ -12,11 +12,21 @@ namespace TestProxyServer
         {
             static void LogConsole(string s) => Console.WriteLine(s);
 
-            var firstClient = new Proxy("127.0.0.1", 23654, false, 15, Encoding.UTF8.GetBytes("testServerPassword"), new List<ProxyServerConnectionDescriptor>()
+            var connectionDescriptors = new List<ProxyServerConnectionDescriptor>()
             {
                 new ProxyServerConnectionDescriptor(null, 80, "www.google.com", 80),
                 new ProxyServerConnectionDescriptor(null, 43, "whois.ripe.net", 43)
-            }, LogConsole);
+            };
+
+            var firstClient = new Proxy(
+                gatewayHost: "127.0.0.1",
+                gatewayPort: 23654,
+                gatewayUseSsl: false,
+                sessionId: 15,
+                sessionPasswordBytes: Encoding.UTF8.GetBytes("testServerPassword"),
+                proxyServerConnectionDescriptors: connectionDescriptors,
+                proxyClientAllowedTargetEndpoints: null,
+                logger: LogConsole);
 
             firstClient.Start();
 
