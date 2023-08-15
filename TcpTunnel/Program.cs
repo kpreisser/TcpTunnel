@@ -25,8 +25,8 @@ namespace TcpTunnel
 
                 Console.WriteLine("Started. Press Ctrl+C or send a SIGTERM to exit.");
 
-                // Simply wait infinitely (until the process is terminated), as we have any form
-                // of a shutdown sequence.
+                // Simply wait infinitely (until the process is terminated), as we don't have
+                // any form of a shutdown sequence.
                 Thread.Sleep(Timeout.Infinite);
             }
         }

@@ -41,10 +41,10 @@ use as a template.
 ## Features
 
 - Uses async I/O for high scalability.
-- Supports SSL/TLS and password authentication for the connections from the Proxies to the Gateway.
+- Supports SSL/TLS and password authentication for connections from the Proxies to the Gateway.
 - Multiplexes multiple (tunneled) TCP connections over a single connection, similar to the stream concept in HTTP/2.
 - Uses flow control for the tunneled TCP connections (using a initial window size of 384 KiB), similar
-  to the flow control mechanism used in HTTP/2.
+  to the flow control mechanism in HTTP/2.
 - Automatically recovers after one of the nodes (*Gateway*, *Proxy-Server*, *Proxy-Client*) was temporarily unavailable.
 - On Windows, it can be installed as service.
 
