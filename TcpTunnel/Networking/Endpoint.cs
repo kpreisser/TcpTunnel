@@ -53,7 +53,10 @@ internal abstract partial class Endpoint
     private SemaphoreSlim? sendQueueSemaphore;
     private bool sendQueueSemaphoreIsDisposed;
 
-    private Task? sendQueueWorkerTask;
+    // This field is volatile because it's checked in SendMessageByQueue() which
+    // might be called from different threads, and we set and clear the field from
+    // within RunEndpointAsync().
+    private volatile Task? sendQueueWorkerTask;
     private long sendQueueByteLength; // accumulated byte length of queued messages
 
     private SemaphoreSlim? pingTimerSemaphore;
