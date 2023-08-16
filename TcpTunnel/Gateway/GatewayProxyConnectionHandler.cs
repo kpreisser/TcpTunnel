@@ -269,8 +269,14 @@ internal class GatewayProxyConnectionHandler
                 {
                     this.SendSessionStatus(proxyServer.Key, true);
 
-                    // Increment the session iteration which the
-                    // proxy-servers need to acknowledge.
+                    // Increment the session iteration which the proxy-servers need
+                    // to acknowledge.
+                    // Requiring to acknowledge a new session iteration ensures
+                    // that we don't forward "old" messages from a proxy-server that
+                    // were intended for a previously connected proxy-client to the
+                    // newly connected proxy-client. For the other direction, this isn't
+                    // necessary as the gateway will assign incrementing IDs
+                    // to the connected proxy-server instances.
                     proxyServer.Value.sessionIterationsToAcknowledge++;
                 }
             }
@@ -281,17 +287,20 @@ internal class GatewayProxyConnectionHandler
                 Constants.ProxyClientId,
                 out var proxyClient);
 
-            if (isAdded)
-                this.SendSessionStatus(null, proxyClient is not null);
-
             if (proxyClient is not null)
             {
                 proxyClient.SendSessionStatus(this.proxyId, isAdded);
 
                 if (isAdded)
                 {
-                    // Increment the session iteration which the
-                    // proxy-server needs to acknowledge.
+                    this.SendSessionStatus(null, true);
+
+                    // Increment the session iteration which the proxy-server needs
+                    // to acknowledge. While this technically wouldn't be needed (this is
+                    // a new connection from a proxy-server so it can't have existing
+                    // messages for a previous proxy-client in its send queue), this
+                    // simplifies the handling because we don't need to differentiate
+                    // between the initial and later session status messages.
                     this.sessionIterationsToAcknowledge++;
                 }
             }
