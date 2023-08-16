@@ -445,10 +445,13 @@ public class Proxy : IInstance
                         }
                         else
                         {
-                            var remoteClient = new TcpClient();
-
                             lock (this.syncRoot)
                             {
+                                if (activeConnections.ContainsKey(connectionId))
+                                    throw new InvalidDataException();
+
+                                var remoteClient = new TcpClient();
+
                                 this.StartTcpTunnelConnection(
                                     endpoint,
                                     partnerProxyId,
@@ -503,7 +506,7 @@ public class Proxy : IInstance
                                     // The data to be queued would exceed the initial window
                                     // size, which cannot happen if the partner proxy works
                                     // correctly. Therefore, abort the connection.
-                                    // By waiting for StopAsync(), we ensure that we don't
+                                    // By waiting for StopAsync(), we ensure that we won't
                                     // process any further commands for that connection.
                                     await connection.StopAsync();
                                 }
@@ -514,10 +517,10 @@ public class Proxy : IInstance
                                 // Abort the connection, which will reset it immediately. We
                                 // use StopAsync() to ensure the connection is removed from
                                 // the list of active connections before we continue.
-                                // Note: This will cause us to send another abort message to
-                                // the partner proxy when the connectionFinishedHandler runs,
-                                // even though this actually wouldn't be necessary since the
-                                // partner sent the abort message in the first place.
+                                // Because the abort has been initiated by the partner proxy,
+                                // we suppress sending the abort message (as the partner
+                                // already knows about the abort).
+                                connection.SuppressSendAbortMessage = true;
                                 await connection.StopAsync();
                             }
                             else if (coreMessage.Length >= 1 + sizeof(int) &&
@@ -555,7 +558,8 @@ public class Proxy : IInstance
     {
         Debug.Assert(Monitor.IsEntered(this.syncRoot));
 
-        var connection = new ProxyTunnelConnection(
+        var connection = default(ProxyTunnelConnection);
+        connection = new ProxyTunnelConnection(
             remoteClient,
             connectHandler,
             receiveBuffer =>
@@ -609,11 +613,11 @@ public class Proxy : IInstance
             },
             isAbort =>
             {
-                if (isAbort)
+                if (isAbort && !connection!.SuppressSendAbortMessage)
                 {
                     // Notify the partner that the connection was aborted.
-                    // This must be done before removing the connection from the `activeConnections`
-                    // dictionary; see comment below.
+                    // This must be done before removing the connection from the
+                    // `activeConnections` dictionary; see comment below.
                     int length = sizeof(long) + 1;
 
                     var (message, coreMessage) = PreparePartnerProxyMessage(
@@ -689,7 +693,12 @@ public class Proxy : IInstance
             }
 
             foreach (var pair in connectionsToWait)
+            {
+                // Sending the abort message won't have any effect (as the partner has
+                // become unavailable and wouldn't receive it), so we suppress it.
+                pair.SuppressSendAbortMessage = true;
                 await pair.StopAsync();
+            }
         }
     }
 

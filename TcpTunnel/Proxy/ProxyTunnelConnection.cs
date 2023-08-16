@@ -15,7 +15,7 @@ internal class ProxyTunnelConnection
 
     // can be null if we don't need to connect
     private readonly Func<CancellationToken, ValueTask>? connectHandler;
-    private readonly Action<Memory<byte>>? receiveHandler;
+    private readonly Action<Memory<byte>> receiveHandler;
     private readonly Action<int> transmitWindowUpdateHandler;
     private readonly Action<bool /* isAbort */> connectionFinishedHandler;
 
@@ -45,10 +45,12 @@ internal class ProxyTunnelConnection
     private bool transmitTaskStopped;
     private bool ctsDisposed;
 
+    private volatile bool suppressSendAbortMessage;
+
     public ProxyTunnelConnection(
         TcpClient remoteClient,
         Func<CancellationToken, ValueTask>? connectHandler,
-        Action<Memory<byte>>? receiveHandler,
+        Action<Memory<byte>> receiveHandler,
         Action<int> transmitWindowUpdateHandler,
         Action<bool> connectionFinishedHandler)
     {
@@ -64,16 +66,16 @@ internal class ProxyTunnelConnection
         this.receiveWindowAvailableSemaphore = new(0);
     }
 
-    public bool IsSendChannelClosed
+    /// <summary>
+    /// Specifies whether the <see cref="Proxy"/> doesn't need to send an abort message
+    /// when the <c>connectionFinishedHandler</c> is invoked. This property is used only
+    /// by the <see cref="Proxy"/>.
+    /// </summary>
+    /// <value></value>
+    public bool SuppressSendAbortMessage
     {
-        get;
-        set;
-    }
-
-    public bool IsReceiveChannelClosed
-    {
-        get;
-        set;
+        get => this.suppressSendAbortMessage;
+        set => this.suppressSendAbortMessage = value;
     }
 
     public void Start()
@@ -161,7 +163,7 @@ internal class ProxyTunnelConnection
             {
                 // Ignore.
                 // This can occur with some implementations, e.g. registered callbacks
-                // from  WebSocket operations using HTTP.sys (from ASP.NET Core) can
+                // from WebSocket operations using HTTP.sys (from ASP.NET Core) can
                 // throw here when calling Cancel() and the IWebHost has already been
                 // disposed.
             }
@@ -214,7 +216,7 @@ internal class ProxyTunnelConnection
 
                         currentWindow -= received;
 
-                        this.receiveHandler?.Invoke(receiveBuffer.AsMemory()[..received]);
+                        this.receiveHandler(receiveBuffer.AsMemory()[..received]);
                     }
                     finally
                     {
@@ -244,7 +246,7 @@ internal class ProxyTunnelConnection
                 // in the connection finished handler (so that when the event is raised, the
                 // connection is already finished and can be removed from the dictionary).
                 if (!isAbort)
-                    this.receiveHandler?.Invoke(Memory<byte>.Empty);
+                    this.receiveHandler(Memory<byte>.Empty);
 
                 // Wait for the transmit task to stop. This can take a while if the partner
                 // proxy doesn't yet send a close.
