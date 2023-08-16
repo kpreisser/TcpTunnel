@@ -68,9 +68,9 @@ use as a template.
 - Install the [.NET 7.0 SDK](https://dotnet.microsoft.com/download) or higher.
 - On Windows, you can use one of the `PUBLISH-xyz.cmd` files to publish the app, either as self-contained app
   (with native AOT compilation), or as framework-dependent app (so it needs the .NET Runtime to be installed).
-- Otherwise, you can publish for the current platform with the following command (as framework-dependent app): 
+- Otherwise, you can publish for the current platform with the following command (as self-contained app): 
   ```
-  dotnet publish "TcpTunnel/TcpTunnel.csproj" -f net7.0 -c Release -p:PublishSingleFile=true --no-self-contained
+  dotnet publish "TcpTunnel/TcpTunnel.csproj" -f net7.0 -c Release -p:PublishSingleFile=true --self-contained
   ```
 
 ## Possible Development TODOs
