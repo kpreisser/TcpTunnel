@@ -9,7 +9,7 @@ using TcpTunnel.Utils;
 
 namespace TcpTunnel.Proxy;
 
-internal class ProxyTunnelConnection
+internal class ProxyTunnelConnection<T>
 {
     private readonly TcpClient remoteClient;
 
@@ -45,7 +45,7 @@ internal class ProxyTunnelConnection
     private bool transmitTaskStopped;
     private bool ctsDisposed;
 
-    private volatile bool suppressSendAbortMessage;
+    private T? data;
 
     public ProxyTunnelConnection(
         TcpClient remoteClient,
@@ -66,16 +66,9 @@ internal class ProxyTunnelConnection
         this.receiveWindowAvailableSemaphore = new(0);
     }
 
-    /// <summary>
-    /// Specifies whether the <see cref="Proxy"/> doesn't need to send an abort message
-    /// when the <c>connectionFinishedHandler</c> is invoked. This property is used only
-    /// by the <see cref="Proxy"/>.
-    /// </summary>
-    /// <value></value>
-    public bool SuppressSendAbortMessage
+    public ref T? Data
     {
-        get => this.suppressSendAbortMessage;
-        set => this.suppressSendAbortMessage = value;
+        get => ref this.data;
     }
 
     public void Start()
@@ -155,18 +148,7 @@ internal class ProxyTunnelConnection
             if (this.ctsDisposed)
                 return;
 
-            try
-            {
-                this.cts.Cancel();
-            }
-            catch (AggregateException)
-            {
-                // Ignore.
-                // This can occur with some implementations, e.g. registered callbacks
-                // from WebSocket operations using HTTP.sys (from ASP.NET Core) can
-                // throw here when calling Cancel() and the IWebHost has already been
-                // disposed.
-            }
+            this.cts.CancelAndIgnoreAggregateException();
         }
     }
 
@@ -368,9 +350,9 @@ internal class ProxyTunnelConnection
             // might unexpectedly hold a lock on syncRoot.
             await Task.Yield();
 
-            // Additionally, abort it here to ensure that when the receive task is
-            // already waiting for the transmit task to complete (when the remote
-            // already half-closed the connection), it can then report the abort
+            // Additionally, abort the connection here to ensure that when the receive
+            // task is already waiting for the transmit task to complete (when the
+            // remote already half-closed the connection), it can then report the abort
             // to the partner proxy.
             this.Abort();
         }

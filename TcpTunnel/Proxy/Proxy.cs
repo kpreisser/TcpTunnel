@@ -25,7 +25,7 @@ namespace TcpTunnel.Proxy;
  * 8 bytes ConnectionID + 0x02: Abort the connection.
  * 8 bytes ConnectionID + 0x03 + 4 bytes window size: Update receive window.
  */
-public class Proxy : IInstance
+public partial class Proxy : IInstance
 {
     // The max message size is defined by the receive buffer size (32 KiB) plus
     // the additional data, which are just a few bytes. Therefore, 512 KiB should
@@ -60,8 +60,8 @@ public class Proxy : IInstance
     private readonly IReadOnlyList<(string host, int port)>? proxyClientAllowedTargetEndpoints;
 
     private Task? readTask;
+    private CancellationTokenSource? readTaskCts;
     private TcpClientFramingEndpoint? tcpEndpoint;
-    private bool stopped;
 
     private ProxyServerListener? listener;
 
@@ -69,7 +69,7 @@ public class Proxy : IInstance
     /// The dictionary of active connections.
     /// </summary>
     private readonly Dictionary<long /* proxyId */,
-        Dictionary<long /* connectionId */, ProxyTunnelConnection>> activePartnerProxiesAndConnections = new();
+        Dictionary<long /* connectionId */, ProxyTunnelConnection<TunnelConnectionData>>> activePartnerProxiesAndConnections = new();
 
     public Proxy(
         string gatewayHost,
@@ -150,7 +150,8 @@ public class Proxy : IInstance
             this.listener.Start();
         }
 
-        this.readTask = ExceptionUtils.StartTask(this.RunReadTaskAsync);
+        this.readTaskCts = new CancellationTokenSource();
+        this.readTask = ExceptionUtils.StartTask(() => this.RunReadTaskAsync(this.readTaskCts.Token));
     }
 
     public void Stop()
@@ -160,60 +161,45 @@ public class Proxy : IInstance
 
         this.listener?.Stop();
 
-        lock (this.syncRoot)
-        {
-            this.stopped = true;
+        // Cancel the read task. This might call the task continuation inline,
+        // which is OK as we will wait for the task anyway directly after that.
+        this.readTaskCts!.CancelAndIgnoreAggregateException();
 
-            this.tcpEndpoint?.Cancel();
-        }
-
-        this.readTask.Wait();
+        this.readTask.GetAwaiter().GetResult();
+        this.readTaskCts!.Dispose();
     }
 
-    private async Task RunReadTaskAsync()
+    private async Task RunReadTaskAsync(CancellationToken readTaskCancellationToken)
     {
         this.logger?.Invoke($"Connecting to gateway...");
 
         string? lastConnectionError = null;
 
-        while (true)
+        try
         {
-            lock (this.syncRoot)
+            while (true)
             {
-                if (this.stopped)
-                    return;
-            }
+                readTaskCancellationToken.ThrowIfCancellationRequested();
 
-            try
-            {
                 var client = new TcpClient();
 
                 bool wasConnected = false;
                 var caughtException = default(Exception);
                 try
                 {
-                    var tcpEndpoint = default(TcpClientFramingEndpoint);
-
-                    tcpEndpoint = new TcpClientFramingEndpoint(
+                    var tcpEndpoint = new TcpClientFramingEndpoint(
                         client,
                         useSendQueue: true,
                         usePingTimer: false,
                         connectHandler: async cancellationToken =>
                         {
-                            // Beginning from this stage, the endpoint can be canceled, so we
-                            // can now set it.
-                            lock (this.syncRoot)
-                            {
-                                if (this.stopped)
-                                    throw new OperationCanceledException();
-
-                                this.tcpEndpoint = tcpEndpoint!;
-                            }
-
                             // Note: We will log the "Connected" message in the stream modifier
                             // callback, because only after that the connection can considered
                             // to be fully established.
-                            await client.ConnectAsync(this.gatewayHost, this.gatewayPort, cancellationToken);
+                            await client.ConnectAsync(
+                                this.gatewayHost,
+                                this.gatewayPort,
+                                cancellationToken);
 
                             // After the socket is connected, configure it to disable the Nagle
                             // algorithm, disable delayed ACKs, and enable TCP keep-alive.
@@ -221,15 +207,6 @@ public class Proxy : IInstance
 
                             // Use a smaller socket send buffer size to reduce buffer bloat.
                             client.Client.SendBufferSize = Constants.SocketSendBufferSize;
-                        },
-                        closeHandler: () =>
-                        {
-                            // Once this handler returns, the endpoint may no longer
-                            // be canceled, so clear the instance.
-                            lock (this.syncRoot)
-                            {
-                                this.tcpEndpoint = null;
-                            }
                         },
                         streamModifier: async (networkStream, cancellationToken) =>
                         {
@@ -267,37 +244,49 @@ public class Proxy : IInstance
                             return modifiedStream;
                         });
 
-                    await tcpEndpoint.RunEndpointAsync(() => this.RunEndpointAsync(tcpEndpoint));
+                    await tcpEndpoint.RunEndpointAsync(
+                        cancellationToken => this.RunEndpointAsync(tcpEndpoint, cancellationToken),
+                        readTaskCancellationToken);
                 }
                 catch (Exception ex)
                 {
+                    // Ignore, and try again. This includes the case when an
+                    // OperationCanceledException was thrown above, which might be caused by
+                    // the Endpoint in order to cancel the current connection.
+                    // We check later if it was caused by us canceling the CTS.
                     caughtException = ex;
-                    throw;
                 }
                 finally
                 {
-                    client.Dispose();
-
-                    // Log the error if we lost connection, or if we couldn't connect and this
-                    // is a new error.
-                    string newConnectionError = caughtException?.Message ?? "Peer closed connection.";
-
-                    if (wasConnected)
-                        this.logger?.Invoke($"Connection to gateway lost ({newConnectionError}). Reconnecting...");
-                    else if (newConnectionError != lastConnectionError)
-                        this.logger?.Invoke($"Unable to connect to gateway ({newConnectionError}). Trying again...");
-
-                    lastConnectionError = newConnectionError;
+                    try
+                    {
+                        client.Dispose();
+                    }
+                    catch
+                    {
+                        // Ignore
+                    }
                 }
-            }
-            catch
-            {
-                // Ignore, and try again.
-            }
 
-            // Wait a bit.
-            // TODO: Use a semaphore to allow to exit faster.
-            await Task.Delay(1000);
+                // Log the error if we lost connection, or if we couldn't connect and this
+                // is a new error.
+                string newConnectionError = caughtException?.Message ?? "Peer closed connection.";
+
+                if (wasConnected)
+                    this.logger?.Invoke($"Connection to gateway lost ({newConnectionError}). Reconnecting...");
+                else if (newConnectionError != lastConnectionError)
+                    this.logger?.Invoke($"Unable to connect to gateway ({newConnectionError}). Trying again...");
+
+                lastConnectionError = newConnectionError;
+
+                // Wait a bit.
+                await Task.Delay(1000, readTaskCancellationToken);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // The proxy was stopped, so return.
+            return;
         }
     }
 
@@ -315,12 +304,19 @@ public class Proxy : IInstance
         }
     }
 
-    private async Task RunEndpointAsync(TcpClientFramingEndpoint endpoint)
+    private async Task RunEndpointAsync(TcpClientFramingEndpoint endpoint, CancellationToken cancellationToken)
     {
         using var pingTimerSemaphore = new SemaphoreSlim(0);
         var pingTimerTask = default(Task);
 
         bool isProxyClient = this.proxyServerConnectionDescriptors is null;
+
+        // Beginning from this stage, the endpoint can be used, so we
+        // can now set it.
+        lock (this.syncRoot)
+        {
+            this.tcpEndpoint = endpoint;
+        }
 
         try
         {
@@ -346,7 +342,8 @@ public class Proxy : IInstance
 
             while (true)
             {
-                var packet = await endpoint.ReceiveMessageAsync(MaxReceiveMessageSize);
+                var packet = await endpoint.ReceiveMessageAsync(MaxReceiveMessageSize, cancellationToken);
+
                 if (packet is null)
                     return;
 
@@ -412,7 +409,7 @@ public class Proxy : IInstance
                     long connectionId = BinaryPrimitives.ReadInt64BigEndian(coreMessage.Span);
                     coreMessage = coreMessage[sizeof(long)..];
 
-                    if (coreMessage.Length >= +1 + sizeof(int) &&
+                    if (coreMessage.Length >= 1 + sizeof(int) &&
                         coreMessage.Span[0] is ProxyMessageTypeOpenConnection &&
                         isProxyClient)
                     {
@@ -477,7 +474,7 @@ public class Proxy : IInstance
                     }
                     else
                     {
-                        ProxyTunnelConnection? connection;
+                        ProxyTunnelConnection<TunnelConnectionData>? connection;
                         lock (this.syncRoot)
                         {
                             // We might fail to find the connectionId if the connection
@@ -520,7 +517,7 @@ public class Proxy : IInstance
                                 // Because the abort has been initiated by the partner proxy,
                                 // we suppress sending the abort message (as the partner
                                 // already knows about the abort).
-                                connection.SuppressSendAbortMessage = true;
+                                connection.Data.SuppressSendAbortMessage = true;
                                 await connection.StopAsync();
                             }
                             else if (coreMessage.Length >= 1 + sizeof(int) &&
@@ -545,21 +542,28 @@ public class Proxy : IInstance
 
             pingTimerSemaphore.Release();
             await (pingTimerTask ?? Task.CompletedTask);
+
+            // Once this method returns, the endpoint may no longer
+            // be used to send data, so clear the instance.
+            lock (this.syncRoot)
+            {
+                this.tcpEndpoint = null;
+            }
         }
     }
 
     private void StartTcpTunnelConnection(
         TcpClientFramingEndpoint endpoint,
         long partnerProxyId,
-        Dictionary<long, ProxyTunnelConnection> activeConnections,
+        Dictionary<long, ProxyTunnelConnection<TunnelConnectionData>> activeConnections,
         long connectionId,
         TcpClient remoteClient,
         Func<CancellationToken, ValueTask>? connectHandler = null)
     {
         Debug.Assert(Monitor.IsEntered(this.syncRoot));
 
-        var connection = default(ProxyTunnelConnection);
-        connection = new ProxyTunnelConnection(
+        var connection = default(ProxyTunnelConnection<TunnelConnectionData>);
+        connection = new(
             remoteClient,
             connectHandler,
             receiveBuffer =>
@@ -613,7 +617,7 @@ public class Proxy : IInstance
             },
             isAbort =>
             {
-                if (isAbort && !connection!.SuppressSendAbortMessage)
+                if (isAbort && !connection!.Data.SuppressSendAbortMessage)
                 {
                     // Notify the partner that the connection was aborted.
                     // This must be done before removing the connection from the
@@ -645,6 +649,9 @@ public class Proxy : IInstance
                 }
             });
 
+        // Ensure other threads can see the connection value after starting the connection.
+        Thread.MemoryBarrier();
+
         // Add the connection and start it.
         activeConnections.Add(connectionId, connection);
         connection.Start();
@@ -656,7 +663,7 @@ public class Proxy : IInstance
         {
             if (!this.activePartnerProxiesAndConnections.TryAdd(
                 partnerProxyId,
-                new Dictionary<long, ProxyTunnelConnection>()))
+                new Dictionary<long, ProxyTunnelConnection<TunnelConnectionData>>()))
                 throw new InvalidDataException();
 
             if (this.proxyServerConnectionDescriptors is not null)
@@ -681,7 +688,7 @@ public class Proxy : IInstance
             // We need to copy the list since we wait for the connections to exit,
             // and they might want to remove themselves from the list in the
             // meanwhile.
-            var connectionsToWait = new List<ProxyTunnelConnection>();
+            var connectionsToWait = new List<ProxyTunnelConnection<TunnelConnectionData>>();
 
             lock (this.syncRoot)
             {
@@ -696,7 +703,7 @@ public class Proxy : IInstance
             {
                 // Sending the abort message won't have any effect (as the partner has
                 // become unavailable and wouldn't receive it), so we suppress it.
-                pair.SuppressSendAbortMessage = true;
+                pair.Data.SuppressSendAbortMessage = true;
                 await pair.StopAsync();
             }
         }

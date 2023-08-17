@@ -72,7 +72,7 @@ internal abstract partial class Endpoint
         this.usePingTimer = usePingTimer;
     }
 
-    protected CancellationToken CancellationToken
+    private CancellationToken CancellationToken
     {
         get => this.cancellationTokenSource!.Token;
     }
@@ -83,19 +83,8 @@ internal abstract partial class Endpoint
     public virtual void Cancel()
     {
         // Public methods on CancellationTokenSource (except Dispose()) are
-        // thread-safe, so we don't need a lock here.            
-        try
-        {
-            this.cancellationTokenSource!.Cancel();
-        }
-        catch (AggregateException)
-        {
-            // Ignore.
-            // This can occur with some implementations, e.g. registered callbacks
-            // from  WebSocket operations using HTTP.sys (from ASP.NET Core) can
-            // throw here when calling Cancel() and the IWebHost has already been
-            // disposed.
-        }
+        // thread-safe, so we don't need a lock here.    
+        this.cancellationTokenSource!.CancelAndIgnoreAggregateException();
     }
 
     /// <summary>
@@ -150,14 +139,14 @@ internal abstract partial class Endpoint
     /// This method can only be called if useSendQueue is false.
     /// </remarks>
     /// <param name="message">The message to send.</param>
-    public Task SendMessageAsync(string message)
+    public ValueTask SendMessageAsync(string message)
     {
         return this.SendMessageAsync(
                 TextMessageEncoding.GetBytes(message),
                 true);
     }
 
-    public Task SendMessageAsync(Memory<byte>? message)
+    public ValueTask SendMessageAsync(Memory<byte>? message)
     {
         return this.SendMessageAsync(message, false);
     }
@@ -173,9 +162,10 @@ internal abstract partial class Endpoint
     /// to this method.
     /// </remarks>
     /// <param name="maxLength">The maximum packet length.</param>
+    /// <param name="cancellationToken"></param>
     /// <returns>The next packet, or <c>null</c> of the client closed the connection</returns>
     /// <exception cref="Exception">If an I/O error occurs</exception>
-    public abstract Task<ReceivedMessage?> ReceiveMessageAsync(int maxLength);
+    public abstract Task<ReceivedMessage?> ReceiveMessageAsync(int maxLength, CancellationToken cancellationToken);
 
     /// <summary>
     /// Resets the ping timer after receiving a client's PING message.
@@ -215,13 +205,13 @@ internal abstract partial class Endpoint
     /// </summary>
     /// <remarks>
     /// You may call <see cref="SendMessageByQueue(byte[], bool)"/> (and other overloads)
-    /// only while the <paramref name="runCallback"/> is executing.
+    /// only while the <paramref name="runEndpointCallback"/> is executing.
     /// </remarks>
-    /// <param name="runCallback"></param>
+    /// <param name="runEndpointCallback"></param>
     /// <param name="cancellationToken"></param>
     /// <returns></returns>
     public async Task RunEndpointAsync(
-            Func<Task> runCallback,
+            Func<CancellationToken, Task> runEndpointCallback,
             CancellationToken cancellationToken = default)
     {
         // First, create the CTS as it might be needed by the ping task.
@@ -237,13 +227,13 @@ internal abstract partial class Endpoint
         bool isNormalClose = true;
         try
         {
-            await this.HandleInitializationAsync().ConfigureAwait(false);
+            await this.HandleInitializationAsync(this.CancellationToken).ConfigureAwait(false);
 
             // After InitilaizeAsync() is finished, we can now start to send data.
             this.StartSendTask();
 
             // Call the callback that can receive data.
-            await this.RunEndpointCoreAsync(runCallback).ConfigureAwait(false);
+            await runEndpointCallback(this.CancellationToken).ConfigureAwait(false);
         }
         catch
         {
@@ -303,7 +293,7 @@ internal abstract partial class Endpoint
                 // Treat it as abnormal close if the cancellation token was cancelled
                 // in the meanwhile.
                 bool normalClose = isNormalClose && !this.CancellationToken.IsCancellationRequested;
-                await this.CloseCoreAsync(normalClose).ConfigureAwait(false);
+                await this.CloseCoreAsync(normalClose, this.CancellationToken).ConfigureAwait(false);
             }
             catch
             {
@@ -318,7 +308,7 @@ internal abstract partial class Endpoint
         }
     }
 
-    protected virtual ValueTask HandleInitializationAsync()
+    protected virtual ValueTask HandleInitializationAsync(CancellationToken cancellationToken)
     {
         // Do nothing.
         return default;
@@ -337,9 +327,10 @@ internal abstract partial class Endpoint
     /// <param name="message"></param>
     /// <param name="textMessage"></param>
     /// <returns></returns>
-    protected abstract Task SendMessageCoreAsync(
+    protected abstract ValueTask SendMessageCoreAsync(
             Memory<byte> message,
-            bool textMessage);
+            bool textMessage,
+            CancellationToken cancellationToken);
 
     /// <summary>
     /// Closes the connection (or the send channel only, depending on the subclass).
@@ -349,12 +340,7 @@ internal abstract partial class Endpoint
     /// <paramref name="normalClose"/> being <c>true</c>.
     /// </remarks>
     /// <returns></returns>
-    protected abstract Task CloseCoreAsync(bool normalClose);
-
-    protected virtual Task RunEndpointCoreAsync(Func<Task> runFunc)
-    {
-        return runFunc();
-    }
+    protected abstract ValueTask CloseCoreAsync(bool normalClose, CancellationToken cancellationToken);
 
     private void StartPingTask()
     {
@@ -455,15 +441,15 @@ internal abstract partial class Endpoint
         }
     }
 
-    private Task SendMessageAsync(Memory<byte>? message, bool textMessage)
+    private ValueTask SendMessageAsync(Memory<byte>? message, bool textMessage)
     {
         if (this.useSendQueue)
             throw new InvalidOperationException("Only non-blocking writes are supported.");
 
         if (message is null)
-            return this.CloseCoreAsync(true);
+            return this.CloseCoreAsync(true, this.CancellationToken);
         else
-            return this.SendMessageCoreAsync(message.Value, textMessage);
+            return this.SendMessageCoreAsync(message.Value, textMessage, this.CancellationToken);
     }
 
     private async Task RunSendQueueWorkerTaskAsync()
@@ -474,6 +460,9 @@ internal abstract partial class Endpoint
 
             while (true)
             {
+                // We don't pass the cancellation token where as we don't want to
+                // break immediately when endpoint was canceled; instead we wait
+                // for the queue end element to be added by the receiver task.
                 await this.sendQueueSemaphore!.WaitAsync().ConfigureAwait(false);
 
                 // Process elements with a high priority first.
@@ -497,7 +486,8 @@ internal abstract partial class Endpoint
                     {
                         try
                         {
-                            await this.CloseCoreAsync(true).ConfigureAwait(false);
+                            await this.CloseCoreAsync(true, this.CancellationToken)
+                                .ConfigureAwait(false);
                         }
                         catch
                         {
@@ -512,8 +502,11 @@ internal abstract partial class Endpoint
 
                         try
                         {
-                            await this.SendMessageCoreAsync(el.Message.Value, el.IsTextMessage)
-                                    .ConfigureAwait(false);
+                            await this.SendMessageCoreAsync(
+                                el.Message.Value,
+                                el.IsTextMessage,
+                                this.CancellationToken)
+                                .ConfigureAwait(false);
                         }
                         catch
                         {

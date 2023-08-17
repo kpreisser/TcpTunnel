@@ -130,18 +130,7 @@ public class Gateway : IInstance
         if (this.listenersCts is null)
             return;
 
-        try
-        {
-            this.listenersCts.Cancel();
-        }
-        catch (AggregateException)
-        {
-            // Ignore.
-            // This can occur with some implementations, e.g. registered callbacks
-            // from  WebSocket operations using HTTP.sys (from ASP.NET Core) can
-            // throw here when calling Cancel() and the IWebHost has already been
-            // disposed.
-        }
+        this.listenersCts.CancelAndIgnoreAggregateException();
 
         foreach (var (listener, task) in this.activeListeners)
         {
@@ -162,10 +151,9 @@ public class Gateway : IInstance
         X509Certificate2? certificate,
         CancellationToken cancellationToken)
     {
-        bool isStopped = false;
         var streamModifier = ModifyStreamAsync;
 
-        var activeHandlers = new Dictionary<GatewayProxyConnectionHandler, (Task task, bool canCancelEndpoint)>();
+        var activeHandlers = new Dictionary<GatewayProxyConnectionHandler, Task>();
 
         try
         {
@@ -209,31 +197,6 @@ public class Gateway : IInstance
                     client,
                     useSendQueue: true,
                     usePingTimer: true,
-                    connectHandler: cancellationToken =>
-                    {
-                        // Beginning from this stage, the endpoint can be
-                        // canceled.
-                        lock (activeHandlers)
-                        {
-                            if (isStopped)
-                                throw new OperationCanceledException();
-
-                            CollectionsMarshal.GetValueRefOrNullRef(activeHandlers, handler!)
-                                .canCancelEndpoint = true;
-                        }
-
-                        return default;
-                    },
-                    closeHandler: () =>
-                    {
-                        // Once this handler returns, the endpoint may no longer
-                        // be canceled.
-                        lock (activeHandlers)
-                        {
-                            CollectionsMarshal.GetValueRefOrNullRef(activeHandlers, handler!)
-                                .canCancelEndpoint = false;
-                        }
-                    },
                     streamModifier: streamModifier);
 
                 handler = new GatewayProxyConnectionHandler(this, endpoint, remoteEndpoint);
@@ -245,7 +208,7 @@ public class Gateway : IInstance
                     {
                         try
                         {
-                            await endpoint.RunEndpointAsync(handler.RunAsync);
+                            await endpoint.RunEndpointAsync(handler.RunAsync, cancellationToken);
                         }
                         catch
                         {
@@ -272,28 +235,20 @@ public class Gateway : IInstance
                         }
                     });
 
-                    activeHandlers.Add(handler, (runTask, false));
+                    activeHandlers.Add(handler, runTask);
                 }
             }
         }
         finally
         {
-            // Stop all active connections.
-            // Need to add the tasks in a separate list, because we cannot wait for them
-            // while we hold the lock for activeHandlers, otherwise a deadlock might occur
-            // because the handlers also remove themselves from that dictionary.
+            // Wait for the connections to finish.
+            // Need to add the tasks in a separate list, because the handlers also
+            // remove themselves from that dictionary.
             var tasksToWaitFor = new List<Task>();
+
             lock (activeHandlers)
             {
-                isStopped = true;
-
-                foreach (var cl in activeHandlers)
-                {
-                    if (cl.Value.canCancelEndpoint)
-                        cl.Key.Endpoint.Cancel();
-
-                    tasksToWaitFor.Add(cl.Value.task);
-                }
+                tasksToWaitFor.AddRange(activeHandlers.Values);
             }
 
             // After releasing the lock, wait for the tasks.
@@ -301,9 +256,7 @@ public class Gateway : IInstance
             // be executing  although it is not in the dictionary any more.
             // However this is OK because the task doesn't do anything after that point.
             foreach (var t in tasksToWaitFor)
-            {
                 await t;
-            }
         }
 
         async ValueTask<Stream?> ModifyStreamAsync(

@@ -63,13 +63,16 @@ internal class GatewayProxyConnectionHandler
         get => this.endpoint;
     }
 
-    public async Task RunAsync()
+    public async Task RunAsync(CancellationToken cancellationToken)
     {
         try
         {
             while (true)
             {
-                var packet = await this.endpoint.ReceiveMessageAsync(Gateway.MaxReceiveMessageSize);
+                var packet = await this.endpoint.ReceiveMessageAsync(
+                    Gateway.MaxReceiveMessageSize,
+                    cancellationToken);
+
                 if (packet is null)
                     return;
 

@@ -34,7 +34,9 @@ internal class TcpClientFramingEndpoint : TcpClientEndpoint
     /// </summary>
     /// <param name="maxLength"></param>
     /// <returns></returns>
-    public override async Task<ReceivedMessage?> ReceiveMessageAsync(int maxLength)
+    public override async Task<ReceivedMessage?> ReceiveMessageAsync(
+        int maxLength,
+        CancellationToken cancellationToken)
     {
         if (this.currentReadBufferFromPool is not null)
         {
@@ -45,7 +47,7 @@ internal class TcpClientFramingEndpoint : TcpClientEndpoint
         try
         {
             // Wait until data is available.
-            await this.Stream!.ReadAsync(Memory<byte>.Empty, this.CancellationToken)
+            await this.Stream!.ReadAsync(Memory<byte>.Empty, cancellationToken)
                 .ConfigureAwait(false);
 
             int payloadLength;
@@ -57,7 +59,7 @@ internal class TcpClientFramingEndpoint : TcpClientEndpoint
                     lengthBuf.AsMemory()[..lengthSize],
                     lengthSize,
                     throwOnEndOfStream: false,
-                    this.CancellationToken);
+                    cancellationToken);
 
                 if (readCount is 0)
                     return null;
@@ -75,7 +77,7 @@ internal class TcpClientFramingEndpoint : TcpClientEndpoint
                 throw new InvalidDataException("Invalid frame length: " + payloadLength);
 
             // Wait until data is available.
-            await this.Stream.ReadAsync(Memory<byte>.Empty, this.CancellationToken)
+            await this.Stream.ReadAsync(Memory<byte>.Empty, cancellationToken)
                 .ConfigureAwait(false);
 
             // Get a receive buffer from the pool.
@@ -83,7 +85,7 @@ internal class TcpClientFramingEndpoint : TcpClientEndpoint
 
             await this.Stream.ReadExactlyAsync(
                     this.currentReadBufferFromPool.AsMemory()[..payloadLength],
-                    this.CancellationToken)
+                    cancellationToken)
                     .ConfigureAwait(false);
 
             var memory = this.currentReadBufferFromPool.AsMemory()[..payloadLength];
@@ -112,7 +114,10 @@ internal class TcpClientFramingEndpoint : TcpClientEndpoint
         return base.HandleCloseAsync();
     }
 
-    protected override async Task SendMessageCoreAsync(Memory<byte> message, bool textMessage)
+    protected override async ValueTask SendMessageCoreAsync(
+        Memory<byte> message,
+        bool textMessage,
+        CancellationToken cancellationToken)
     {
         int newFrameLength = sizeof(int) + message.Length;
         var newFrameArray = ArrayPool<byte>.Shared.Rent(newFrameLength);
@@ -123,7 +128,7 @@ internal class TcpClientFramingEndpoint : TcpClientEndpoint
             BinaryPrimitives.WriteInt32BigEndian(newFrame.Span, message.Length);
             message.CopyTo(newFrame[sizeof(int)..]);
 
-            await base.SendMessageCoreAsync(newFrame, textMessage)
+            await base.SendMessageCoreAsync(newFrame, textMessage, cancellationToken)
                 .ConfigureAwait(false);
         }
         finally

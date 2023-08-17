@@ -48,7 +48,9 @@ internal class TcpClientEndpoint : Endpoint
     /// </summary>
     /// <param name="maxLength"></param>
     /// <returns></returns>
-    public override async Task<ReceivedMessage?> ReceiveMessageAsync(int maxLength)
+    public override async Task<ReceivedMessage?> ReceiveMessageAsync(
+            int maxLength,
+            CancellationToken cancellationToken)
     {
         if (this.currentReadBufferFromPool is not null)
         {
@@ -59,7 +61,7 @@ internal class TcpClientEndpoint : Endpoint
         try
         {
             // Wait until data is available.
-            await this.stream!.ReadAsync(Memory<byte>.Empty, this.CancellationToken)
+            await this.stream!.ReadAsync(Memory<byte>.Empty, cancellationToken)
                 .ConfigureAwait(false);
 
             // Get a receive buffer from the pool.
@@ -72,7 +74,7 @@ internal class TcpClientEndpoint : Endpoint
             int count = await this.stream.ReadAsync(
                     this.currentReadBufferFromPool.AsMemory()
                         [..(maxLength is -1 ? this.currentReadBufferFromPool.Length : maxReceiveCount)],
-                    this.CancellationToken)
+                    cancellationToken)
                     .ConfigureAwait(false);
 
             if (count > 0)
@@ -97,21 +99,21 @@ internal class TcpClientEndpoint : Endpoint
         }
     }
 
-    protected override async ValueTask HandleInitializationAsync()
+    protected override async ValueTask HandleInitializationAsync(CancellationToken cancellationToken)
     {
-        await base.HandleInitializationAsync().ConfigureAwait(false);
+        await base.HandleInitializationAsync(cancellationToken).ConfigureAwait(false);
 
         try
         {
             if (this.connectHandler is { } connectHandler)
-                await connectHandler(this.CancellationToken).ConfigureAwait(false);
+                await connectHandler(cancellationToken).ConfigureAwait(false);
 
             var ns = new NetworkStream(this.client.Client, ownsSocket: false);
             this.stream = ns;
 
             if (this.streamModifier is not null)
             {
-                var newStream = await this.streamModifier(ns, this.CancellationToken)
+                var newStream = await this.streamModifier(ns, cancellationToken)
                         .ConfigureAwait(false);
 
                 if (newStream is not null)
@@ -147,7 +149,7 @@ internal class TcpClientEndpoint : Endpoint
         this.closeHandler?.Invoke();
     }
 
-    protected override Task CloseCoreAsync(bool normalClose)
+    protected override ValueTask CloseCoreAsync(bool normalClose, CancellationToken cancellationToken)
     {
         if (normalClose)
         {
@@ -161,12 +163,13 @@ internal class TcpClientEndpoint : Endpoint
             this.client.Client.Close(0);
         }
 
-        return Task.CompletedTask;
+        return default;
     }
 
-    protected override async Task SendMessageCoreAsync(
+    protected override async ValueTask SendMessageCoreAsync(
             Memory<byte> message,
-            bool textMessage)
+            bool textMessage,
+            CancellationToken cancellationToken)
     {
         // We only support binary messages.
         if (textMessage)
@@ -177,10 +180,10 @@ internal class TcpClientEndpoint : Endpoint
 
         try
         {
-            await this.stream!.WriteAsync(message, this.CancellationToken)
+            await this.stream!.WriteAsync(message, cancellationToken)
                     .ConfigureAwait(false);
 
-            await this.stream.FlushAsync(this.CancellationToken)
+            await this.stream.FlushAsync(cancellationToken)
                     .ConfigureAwait(false);
         }
         catch

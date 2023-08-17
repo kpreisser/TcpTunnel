@@ -93,18 +93,7 @@ internal class ProxyServerListener
         if (this.listenersCts is null)
             return;
 
-        try
-        {
-            this.listenersCts.Cancel();
-        }
-        catch (AggregateException)
-        {
-            // Ignore.
-            // This can occur with some implementations, e.g. registered callbacks
-            // from  WebSocket operations using HTTP.sys (from ASP.NET Core) can
-            // throw here when calling Cancel() and the IWebHost has already been
-            // disposed.
-        }
+        this.listenersCts.CancelAndIgnoreAggregateException();
 
         foreach (var (listener, task) in this.listeners)
         {
