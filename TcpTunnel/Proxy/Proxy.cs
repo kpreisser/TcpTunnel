@@ -515,8 +515,8 @@ public partial class Proxy : IInstance
                                 // use StopAsync() to ensure the connection is removed from
                                 // the list of active connections before we continue.
                                 // Because the abort has been initiated by the partner proxy,
-                                // we suppress sending the abort message (as the partner
-                                // already knows about the abort).
+                                // we try to suppress sending the abort message (as the
+                                // partner already knows about the abort).
                                 connection.Data.SuppressSendAbortMessage = true;
                                 await connection.StopAsync();
                             }
@@ -702,7 +702,7 @@ public partial class Proxy : IInstance
             foreach (var pair in connectionsToWait)
             {
                 // Sending the abort message won't have any effect (as the partner has
-                // become unavailable and wouldn't receive it), so we suppress it.
+                // become unavailable and wouldn't receive it), so we try to suppress it.
                 pair.Data.SuppressSendAbortMessage = true;
                 await pair.StopAsync();
             }

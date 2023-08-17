@@ -192,14 +192,13 @@ public class Gateway : IInstance
                 var remoteEndpoint = client.Client.RemoteEndPoint!;
                 this.logger?.Invoke($"Accepted connection from '{remoteEndpoint}'.");
 
-                var handler = default(GatewayProxyConnectionHandler);
                 var endpoint = new TcpClientFramingEndpoint(
                     client,
                     useSendQueue: true,
                     usePingTimer: true,
                     streamModifier: streamModifier);
 
-                handler = new GatewayProxyConnectionHandler(this, endpoint, remoteEndpoint);
+                var handler = new GatewayProxyConnectionHandler(this, endpoint, remoteEndpoint);
 
                 lock (activeHandlers)
                 {
