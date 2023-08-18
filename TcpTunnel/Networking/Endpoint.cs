@@ -460,7 +460,7 @@ internal abstract partial class Endpoint
 
             while (true)
             {
-                // We don't pass the cancellation token where as we don't want to
+                // We don't pass the cancellation token here as we don't want to
                 // break immediately when endpoint was canceled; instead we wait
                 // for the queue end element to be added by the receiver task.
                 await this.sendQueueSemaphore!.WaitAsync().ConfigureAwait(false);

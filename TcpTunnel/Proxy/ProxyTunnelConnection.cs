@@ -169,7 +169,8 @@ internal class ProxyTunnelConnection<T>
                 remoteClientStream = new NetworkStream(remoteClient.Client, ownsSocket: false);
 
                 // After connecting, create the transmit task.
-                transmitTask = ExceptionUtils.StartTask(() => this.RunTransmitTaskAsync(remoteClientStream));
+                transmitTask = ExceptionUtils.StartTask(
+                    () => this.RunTransmitTaskAsync(remoteClientStream));
 
                 // Now start to receive.
                 int currentWindow = 0;
@@ -187,18 +188,24 @@ internal class ProxyTunnelConnection<T>
 
                     try
                     {
-                        // We can call the synchronous Read method without passing a CancellationToken since
-                        // it should return immediately (as we know there is data available), which should be
-                        // less expensive.
+                        // We can call the synchronous Read method without passing a
+                        // CancellationToken since it should return immediately (as we know
+                        // there is data available), which should be less expensive.
                         int received = remoteClientStream.Read(
                             receiveBuffer.AsSpan()[..Math.Min(receiveBuffer.Length, currentWindow)]);
+
+                        // Invoke the receive handler. When the received length is 0, the partner
+                        // proxy will know that the connection was half-closed. If it was aborted
+                        // (indicated by ReadAsync() throwing an exception), we will report that
+                        // instead in the connection finished handler (so that when the event is
+                        // raised, the connection is already finished and can be removed from
+                        // the dictionary).
+                        this.receiveHandler(receiveBuffer.AsMemory()[..received]);
 
                         if (received is 0)
                             break; // Connection has been closed.
 
-                        currentWindow -= received;
-
-                        this.receiveHandler(receiveBuffer.AsMemory()[..received]);
+                        currentWindow -= received;                        
                     }
                     finally
                     {
@@ -222,13 +229,6 @@ internal class ProxyTunnelConnection<T>
                     this.receiveTaskStopped = true;
                     this.receiveWindowAvailableSemaphore.Dispose();
                 }
-
-                // Invoke the receive handler with an empty array, to notify it that the
-                // connection was half-closed. If it was aborted, we will report it instead
-                // in the connection finished handler (so that when the event is raised, the
-                // connection is already finished and can be removed from the dictionary).
-                if (!isAbort)
-                    this.receiveHandler(Memory<byte>.Empty);
 
                 // Wait for the transmit task to stop. This can take a while if the partner
                 // proxy doesn't yet send a close.
@@ -254,7 +254,9 @@ internal class ProxyTunnelConnection<T>
             // We also need to check whether cancellation has been requested, because
             // it could happen that Abort() was called after we already entered the
             // above 'finally' clause (due to a normal close) and waited for the
-            // transmit task to finish.
+            // transmit task to finish (for example, if the transmit task encountered
+            // an exception and therefore called Abort() which we need to report to
+            // the partner proxy, or if the partner proxy sent an abort message).
             bool ctsWasCanceled;
 
             lock (this.syncRoot)
