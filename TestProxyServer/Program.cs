@@ -18,7 +18,7 @@ namespace TestProxyServer
                 new ProxyServerConnectionDescriptor(null, 43, "whois.ripe.net", 43)
             };
 
-            var firstClient = new Proxy(
+            var proxyServer = new Proxy(
                 gatewayHost: "127.0.0.1",
                 gatewayPort: 23654,
                 gatewayUseSsl: false,
@@ -28,12 +28,12 @@ namespace TestProxyServer
                 proxyClientAllowedTargetEndpoints: null,
                 logger: LogConsole);
 
-            firstClient.Start();
+            proxyServer.Start();
 
             Console.WriteLine($"Proxy-Server started.");
             Console.ReadLine();
             Console.WriteLine("Stopping Proxy-Server...");
-            firstClient.Stop();
+            proxyServer.Stop();
             Console.WriteLine("Proxy-Server stopped.");
         }
     }

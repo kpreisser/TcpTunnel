@@ -19,7 +19,7 @@ namespace TestProxyClient
                 ("whois.ripe.net", 43)
             };
 
-            var firstClient = new Proxy(
+            var proxyClient = new Proxy(
                 gatewayHost: "localhost",
                 gatewayPort: 23654,
                 gatewayUseSsl: false,
@@ -29,12 +29,12 @@ namespace TestProxyClient
                 proxyClientAllowedTargetEndpoints: allowedTargetEndpoints,
                 logger: LogConsole);
 
-            firstClient.Start();
+            proxyClient.Start();
 
             Console.WriteLine($"Proxy-Client started.");
             Console.ReadLine();
             Console.WriteLine("Stopping Proxy-Client...");
-            firstClient.Stop();
+            proxyClient.Stop();
             Console.WriteLine("Proxy-Client stopped.");
         }
     }

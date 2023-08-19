@@ -24,7 +24,12 @@ internal abstract partial class Endpoint
     /// is aborted, if the number of messages is more than
     /// <see cref="MinSendQueueItemCountForByteLengthCheck"/>.
     /// </summary>
-    private const long MaxSendQueueByteLength = 20 * 1024 * 1024;
+    /// <remarks>
+    /// This is to prevent us from buffering more data endlessly if the remote endpoint
+    /// doesn't read from the socket. However, the limit is relatively large to not
+    /// erroneously abort the connection when we actually want to send that much messages.
+    /// </remarks>
+    private const long MaxSendQueueByteLength = 50 * 1024 * 1024;
 
     /// <summary>
     /// The minimum number of enqueued messages before the check for
@@ -34,7 +39,7 @@ internal abstract partial class Endpoint
     /// This is to ensure we can still send a single, large message that is larger
     /// than <see cref="MaxSendQueueByteLength"/>.
     /// </remarks>
-    private const long MinSendQueueItemCountForByteLengthCheck = 4;
+    private const long MinSendQueueItemCountForByteLengthCheck = 100;
 
     private const int PingTimeout = 120 * 1000;
 

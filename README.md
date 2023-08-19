@@ -34,9 +34,12 @@ The following image illustrates this scenario:
 
 ## Configuration
 
-The TcpTunnel is configured via an XML file with the name `settings.xml` in the application's directory.
+TcpTunnel is configured via an XML file with the name `settings.xml` in the application's directory.
 When building the application, sample setting files will get copied to the output directory which you can
 use as a template.
+
+You can define multiple instances (e.g. a Gateway and a Proxy-Server instance) in the settings file, which
+will then be run by a single application process.
 
 ## Features
 
@@ -60,8 +63,10 @@ use as a template.
   This allows the Proxy-Server and the Proxy-Client to operate at different trust levels, e.g. if you
   want to share the Proxy-Server to other people but want to allow them to only be able to connect to
   specific target endpoints.
-- There are currently no DoS protection mechanisms implemented, e.g. to limit the number of received
-  forwarded connections.
+- There are currently no special DoS protection mechanisms implemented (to handle the case when you don't
+  control the partner proxy or the gateway), e.g. to limit the number of received forwarded connections,
+  but there are basic limitations implemented, like limiting the max. received message size and ensuring
+  that the partner proxy doesn't send more data for a connection than allowed by the flow control window.
 
 ## Building
 

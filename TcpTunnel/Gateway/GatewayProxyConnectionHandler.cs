@@ -225,6 +225,9 @@ internal class GatewayProxyConnectionHandler
                                 // Notify the proxy that the authentication failed.
                                 var response = new byte[] { 0x01, 0x00 };
                                 this.endpoint.SendMessageByQueue(response);
+
+                                // Also, close the connection.
+                                return;
                             }
                         }
                     }

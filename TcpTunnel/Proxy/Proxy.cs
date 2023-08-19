@@ -280,7 +280,7 @@ public partial class Proxy : IInstance
                 lastConnectionError = newConnectionError;
 
                 // Wait a bit.
-                await Task.Delay(1000, readTaskCancellationToken);
+                await Task.Delay(2000, readTaskCancellationToken);
             }
         }
         catch (OperationCanceledException)
@@ -396,7 +396,7 @@ public partial class Proxy : IInstance
                     if (partnerProxyIdNullable is { } value && value is Constants.ProxyClientId)
                         throw new InvalidDataException();
 
-                    long partnerProxyId = partnerProxyIdNullable ?? 0;
+                    long partnerProxyId = partnerProxyIdNullable ?? Constants.ProxyClientId;
 
                     // We don't need a lock to access the dictionary here since it is
                     // only modified by us (the receiver task). We only need a lock to
