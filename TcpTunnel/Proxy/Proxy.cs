@@ -605,14 +605,23 @@ public partial class Proxy : IInstance
                 // to avoid a slowdown of the connection if both sides currently send data.
                 // 
                 // From the protocol side this will work because even if we are the
-                // proxy-listener which accepts TCP connections (and has to inform the
-                // partner proxy about the new connection), we can only send a window
-                // update if the partner proxy has already received the "open connection"
-                // message (as this is a prerequisite before the partner can send us data
+                // proxy-server which accepts TCP connections (and has to inform the
+                // proxy-client about the new connection), we can only send a window
+                // update if the proxy-client has already received the "open connection"
+                // message (as this is a prerequisite before the proxy-client can send us data
                 // for the connection that might trigger a window update from our side),
                 // so a window update message can never be sent to the partner before
                 // sending the "open connection" message, even if it is sent with a higher
                 // priority than that message.
+                // 
+                // Additionally, even though a window update message would be sent with a
+                // higher priority than a session iteration acknowledge message (after receiving
+                // a new session status), this will not cause problems as only the proxy-server
+                // needs to acknowledge a new session iteration, and it's not possible for the
+                // proxy-server to send window update messages before sending the acknowledge
+                // message as that is a prerequisite before the proxy-client will receive a
+                // forwarded connection and can send data to the proxy-server, which would then
+                // cause a window update message to be sent.
                 endpoint.SendMessageByQueue(message, highPriority: true);
             },
             isAbort =>
