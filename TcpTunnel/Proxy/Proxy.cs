@@ -518,6 +518,8 @@ public partial class Proxy : IInstance
                                 // we try to suppress sending the abort message (as the
                                 // partner already knows about the abort).
                                 connection.Data.SuppressSendAbortMessage = true;
+                                Thread.MemoryBarrier();
+
                                 await connection.StopAsync();
                             }
                             else if (coreMessage.Length >= 1 + sizeof(int) &&
@@ -626,6 +628,8 @@ public partial class Proxy : IInstance
             },
             isAbort =>
             {
+                Thread.MemoryBarrier();
+
                 if (isAbort && !connection!.Data.SuppressSendAbortMessage)
                 {
                     // Notify the partner that the connection was aborted.
@@ -713,6 +717,8 @@ public partial class Proxy : IInstance
                 // Sending the abort message won't have any effect (as the partner has
                 // become unavailable and wouldn't receive it), so we try to suppress it.
                 pair.Data.SuppressSendAbortMessage = true;
+                Thread.MemoryBarrier();
+
                 await pair.StopAsync();
             }
         }

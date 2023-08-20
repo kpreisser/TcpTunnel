@@ -58,17 +58,17 @@ internal abstract partial class Endpoint
     private SemaphoreSlim? sendQueueSemaphore;
     private bool sendQueueSemaphoreIsDisposed;
 
-    // This field is volatile because it's checked in SendMessageByQueue() which
-    // might be called from different threads, and we set and clear the field from
-    // within RunEndpointAsync().
-    private volatile Task? sendQueueWorkerTask;
+    // We use memory barriers when accessing this field, because it's checked in
+    // SendMessageByQueue() which might be called from different threads, and we set
+    // and clear the field from within RunEndpointAsync().
+    private Task? sendQueueWorkerTask;
     private long sendQueueByteLength; // accumulated byte length of queued messages
 
     private SemaphoreSlim? pingTimerSemaphore;
     private Task? pingTimerTask;
-    private volatile bool pingTimerQuit;
+    private bool pingTimerQuit;
 
-    private volatile bool ignorePingTimeout;
+    private bool ignorePingTimeout;
 
     protected Endpoint(bool useSendQueue, bool usePingTimer)
         : base()
@@ -181,6 +181,7 @@ internal abstract partial class Endpoint
             return;
 
         this.ignorePingTimeout = false;
+        Thread.MemoryBarrier();
 
         // Only release the semaphore if the ping timer already handled all previous
         // releases.
@@ -198,6 +199,7 @@ internal abstract partial class Endpoint
             return;
 
         this.ignorePingTimeout = true;
+        Thread.MemoryBarrier();
 
         // Only release the semaphore if the ping timer already handled all previous
         // releases.
@@ -276,6 +278,8 @@ internal abstract partial class Endpoint
                 // we would block the thread pool (as we are ourselves an async
                 // method running in a thread pool thread).
                 await this.sendQueueWorkerTask.ConfigureAwait(false);
+                
+                Thread.MemoryBarrier();
                 this.sendQueueWorkerTask = null;
             }
 
@@ -283,6 +287,8 @@ internal abstract partial class Endpoint
             if (this.usePingTimer)
             {
                 this.pingTimerQuit = true;
+                Thread.MemoryBarrier();
+
                 this.pingTimerSemaphore!.Release();
 
                 // Asynchronously wait for the task to finish. See comment above.
@@ -376,6 +382,9 @@ internal abstract partial class Endpoint
 
             this.sendQueueWorkerTask = ExceptionUtils.StartTask(
                     this.RunSendQueueWorkerTaskAsync);
+            
+            // Ensure other threads calling SendMessageByQueue() can see the value.
+            Thread.MemoryBarrier();
         }
     }
 
@@ -386,6 +395,8 @@ internal abstract partial class Endpoint
     {
         if (!this.useSendQueue)
             throw new InvalidOperationException("Only blocking writes are supported.");
+
+        Thread.MemoryBarrier();
         if (this.sendQueueWorkerTask is null)
             throw new InvalidOperationException(
                 "Endpoint has not yet been initialized or has already stopped. " +
@@ -552,6 +563,8 @@ internal abstract partial class Endpoint
         {
             bool ok = await this.pingTimerSemaphore!.WaitAsync(PingTimeout)
                     .ConfigureAwait(false);
+
+            Thread.MemoryBarrier();
 
             if (this.pingTimerQuit)
             {

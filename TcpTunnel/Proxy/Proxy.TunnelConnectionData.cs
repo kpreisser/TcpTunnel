@@ -8,6 +8,6 @@ public partial class Proxy
         /// Specifies whether the <see cref="Proxy"/> doesn't need to send an abort message
         /// when the <c>connectionFinishedHandler</c> is invoked.
         /// </summary>
-        public volatile bool SuppressSendAbortMessage;
+        public bool SuppressSendAbortMessage;
     }
 }
