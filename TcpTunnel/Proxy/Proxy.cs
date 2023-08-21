@@ -494,19 +494,23 @@ public partial class Proxy : IInstance
                                 var newPacket = new byte[coreMessage.Length - 1];
                                 coreMessage[1..].CopyTo(newPacket);
 
-                                try
-                                {
-                                    connection.EnqueueTransmitData(newPacket);
-                                }
-                                catch (InvalidOperationException)
-                                {
-                                    // The data to be queued would exceed the initial window
-                                    // size, which cannot happen if the partner proxy works
-                                    // correctly. Therefore, abort the connection.
-                                    // By waiting for StopAsync(), we ensure that we won't
-                                    // process any further commands for that connection.
-                                    await connection.StopAsync();
-                                }
+                                // This will throw if the data to be queued would exceed the
+                                // initial window size, which cannot happen if the partner proxy
+                                // works correctly. Similar to the case with UpdateReceiveWindow(),
+                                // we will abort the connection to the gateway.
+                                connection.EnqueueTransmitData(newPacket);
+                            }
+
+                            else if (coreMessage.Length >= 1 + sizeof(int) &&
+                                coreMessage.Span[0] is ProxyMessageTypeUpdateWindow)
+                            {
+                                // Update the receive window size.
+                                int windowSize = BinaryPrimitives.ReadInt32BigEndian(
+                                    coreMessage.Span[1..]);
+
+                                // This will throw if the window size to be queued would exceed
+                                // the allowed range; see comment above.
+                                connection.UpdateReceiveWindow(windowSize);
                             }
                             else if (coreMessage.Length >= 1 &&
                                 coreMessage.Span[0] is ProxyMessageTypeAbortConnection)
@@ -521,15 +525,6 @@ public partial class Proxy : IInstance
                                 Thread.MemoryBarrier();
 
                                 await connection.StopAsync();
-                            }
-                            else if (coreMessage.Length >= 1 + sizeof(int) &&
-                                coreMessage.Span[0] is ProxyMessageTypeUpdateWindow)
-                            {
-                                // Update the receive window size.
-                                int windowSize = BinaryPrimitives.ReadInt32BigEndian(
-                                    coreMessage.Span[1..]);
-
-                                connection.UpdateReceiveWindow(windowSize);
                             }
                         }
                     }
@@ -568,7 +563,7 @@ public partial class Proxy : IInstance
         connection = new(
             remoteClient,
             connectHandler,
-            receiveBuffer =>
+            receiveHandler: receiveBuffer =>
             {
                 // Forward the data packet.
                 int length = sizeof(long) + 1 + receiveBuffer.Length;
@@ -586,7 +581,7 @@ public partial class Proxy : IInstance
 
                 endpoint.SendMessageByQueue(message);
             },
-            window =>
+            transmitWindowUpdateHandler: window =>
             {
                 // Forward the transmit window update.
                 int length = sizeof(long) + 1 + sizeof(int);
@@ -626,7 +621,7 @@ public partial class Proxy : IInstance
                 // cause a window update message to be sent.
                 endpoint.SendMessageByQueue(message, highPriority: true);
             },
-            isAbort =>
+            connectionFinishedHandler: isAbort =>
             {
                 Thread.MemoryBarrier();
 

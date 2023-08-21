@@ -107,7 +107,7 @@ internal class ProxyTunnelConnection<T>
             // transmit window. Otherwise, the partner proxy wouldn't work
             // correctly or might be malicious.
             if (data.Length > this.transmitWindowAvailable)
-                throw new InvalidOperationException();
+                throw new InvalidOperationException("The data would exceed the available transmit window size.");
 
             this.transmitWindowAvailable -= data.Length;
             this.transmitDataQueue.Enqueue(data);
