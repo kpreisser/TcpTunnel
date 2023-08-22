@@ -44,7 +44,7 @@ internal abstract partial class Endpoint
     private const int PingTimeout = 120 * 1000;
 
     protected static readonly Encoding TextMessageEncoding =
-            new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+        new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
 
     private readonly bool useSendQueue;
     private readonly bool usePingTimer;
@@ -98,7 +98,7 @@ internal abstract partial class Endpoint
     /// <remarks>
     /// This method does not block because it adds the message to
     /// a internal queue, from which a sender task takes the messages and calls
-    /// <see cref="SendMessageCoreAsync(Memory{byte}, bool)"/>.
+    /// <see cref="SendMessageCoreAsync(Memory{byte}, bool, CancellationToken)"/>.
     /// This method can be called from multiple threads at the same time.
     /// 
     /// This is to avoid one client blocking all other clients when it does not read data
@@ -118,17 +118,17 @@ internal abstract partial class Endpoint
     public void SendMessageByQueue(string message, bool highPriority = false)
     {
         this.SendMessageByQueue(
-                TextMessageEncoding.GetBytes(message),
-                true,
-                highPriority);
+            TextMessageEncoding.GetBytes(message),
+            true,
+            highPriority);
     }
 
     public void SendMessageByQueue(byte[] message, bool highPriority = false)
     {
         this.SendMessageByQueue(
-                message is null ? default(Memory<byte>?) : message.AsMemory(),
-                false,
-                highPriority);
+            message is null ? default(Memory<byte>?) : message.AsMemory(),
+            false,
+            highPriority);
     }
 
     public void SendMessageByQueue(Memory<byte>? message, bool highPriority = false)
@@ -147,8 +147,8 @@ internal abstract partial class Endpoint
     public ValueTask SendMessageAsync(string message)
     {
         return this.SendMessageAsync(
-                TextMessageEncoding.GetBytes(message),
-                true);
+            TextMessageEncoding.GetBytes(message),
+            true);
     }
 
     public ValueTask SendMessageAsync(Memory<byte>? message)
@@ -162,15 +162,17 @@ internal abstract partial class Endpoint
     /// </summary>
     /// <remarks>
     /// Note that the returned's <see cref="ReceivedMessage.Buffer"/> may be reused for
-    /// the next call to <see cref="ReceiveMessageAsync(int)"/>, so you should should
-    /// either copy those bytes or use ByteMessage/StringMessage before the next call
-    /// to this method.
+    /// the next call to <see cref="ReceiveMessageAsync(int, CancellationToken)"/>, so
+    /// you should should either copy those bytes or use ByteMessage/StringMessage
+    /// before the next call to this method.
     /// </remarks>
     /// <param name="maxLength">The maximum packet length.</param>
     /// <param name="cancellationToken"></param>
     /// <returns>The next packet, or <c>null</c> of the client closed the connection</returns>
     /// <exception cref="Exception">If an I/O error occurs</exception>
-    public abstract Task<ReceivedMessage?> ReceiveMessageAsync(int maxLength, CancellationToken cancellationToken);
+    public abstract Task<ReceivedMessage?> ReceiveMessageAsync(
+        int maxLength, 
+        CancellationToken cancellationToken);
 
     /// <summary>
     /// Resets the ping timer after receiving a client's PING message.
@@ -218,12 +220,12 @@ internal abstract partial class Endpoint
     /// <param name="cancellationToken"></param>
     /// <returns></returns>
     public async Task RunEndpointAsync(
-            Func<CancellationToken, Task> runEndpointCallback,
-            CancellationToken cancellationToken = default)
+        Func<CancellationToken, Task> runEndpointCallback,
+        CancellationToken cancellationToken = default)
     {
         // First, create the CTS as it might be needed by the ping task.
         this.cancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(
-                cancellationToken);
+            cancellationToken);
         Thread.MemoryBarrier();
 
         // Start the ping task before running initalize (which e.g. might want
@@ -337,11 +339,12 @@ internal abstract partial class Endpoint
     /// </summary>
     /// <param name="message"></param>
     /// <param name="textMessage"></param>
+    /// <param name="cancellationToken"></param>
     /// <returns></returns>
     protected abstract ValueTask SendMessageCoreAsync(
-            Memory<byte> message,
-            bool textMessage,
-            CancellationToken cancellationToken);
+        Memory<byte> message,
+        bool textMessage,
+        CancellationToken cancellationToken);
 
     /// <summary>
     /// Closes the connection (or the send channel only, depending on the subclass).
@@ -364,7 +367,7 @@ internal abstract partial class Endpoint
             Thread.MemoryBarrier();
 
             this.pingTimerTask = ExceptionUtils.StartTask(
-                    this.RunPingTimerTaskAsync);
+                this.RunPingTimerTaskAsync);
         }
     }
 
@@ -381,7 +384,7 @@ internal abstract partial class Endpoint
             Thread.MemoryBarrier();
 
             this.sendQueueWorkerTask = ExceptionUtils.StartTask(
-                    this.RunSendQueueWorkerTaskAsync);
+                this.RunSendQueueWorkerTaskAsync);
             
             // Ensure other threads calling SendMessageByQueue() can see the value.
             Thread.MemoryBarrier();
@@ -398,10 +401,12 @@ internal abstract partial class Endpoint
 
         Thread.MemoryBarrier();
         if (this.sendQueueWorkerTask is null)
+        {
             throw new InvalidOperationException(
                 "Endpoint has not yet been initialized or has already stopped. " +
                 $"You may call this method only while the callback passed to " +
                 $"{nameof(RunEndpointAsync)} is executing.");
+        }
 
         // If the size of queued messages was not too large, add the message to the queue.
         // Note: If this method is called again, the length of the next message will be
@@ -409,12 +414,12 @@ internal abstract partial class Endpoint
         if (message is not null)
         {
             long existingQueueStrLength = Interlocked.Add(
-                    ref this.sendQueueByteLength,
-                    message.Value.Length) -
-                    message.Value.Length;
+                ref this.sendQueueByteLength,
+                message.Value.Length) -
+                message.Value.Length;
 
             if (this.sendQueue!.Count >= MinSendQueueItemCountForByteLengthCheck &&
-                    existingQueueStrLength > MaxSendQueueByteLength)
+                existingQueueStrLength > MaxSendQueueByteLength)
             {
                 // The queue is too large. Abort the connection; and ensure the SendTask does
                 // not send anything after the last message (in case the queue is emptied in
@@ -562,7 +567,7 @@ internal abstract partial class Endpoint
         while (true)
         {
             bool ok = await this.pingTimerSemaphore!.WaitAsync(PingTimeout)
-                    .ConfigureAwait(false);
+                .ConfigureAwait(false);
 
             Thread.MemoryBarrier();
 

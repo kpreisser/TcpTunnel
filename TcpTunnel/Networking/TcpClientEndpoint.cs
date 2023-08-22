@@ -22,12 +22,12 @@ internal class TcpClientEndpoint : Endpoint
     private byte[]? currentReadBufferFromPool;
 
     public TcpClientEndpoint(
-            TcpClient client,
-            bool useSendQueue,
-            bool usePingTimer,
-            Func<CancellationToken, ValueTask>? connectHandler = null,
-            Action? closeHandler = null,
-            Func<NetworkStream, CancellationToken, ValueTask<Stream?>>? streamModifier = null)
+        TcpClient client,
+        bool useSendQueue,
+        bool usePingTimer,
+        Func<CancellationToken, ValueTask>? connectHandler = null,
+        Action? closeHandler = null,
+        Func<NetworkStream, CancellationToken, ValueTask<Stream?>>? streamModifier = null)
         : base(useSendQueue, usePingTimer)
     {
         this.client = client ?? throw new ArgumentNullException(nameof(client));
@@ -47,10 +47,11 @@ internal class TcpClientEndpoint : Endpoint
     /// been reached or <paramref name="maxLength"/> is 0.
     /// </summary>
     /// <param name="maxLength"></param>
+    /// <param name="cancellationToken"></param>
     /// <returns></returns>
     public override async Task<ReceivedMessage?> ReceiveMessageAsync(
-            int maxLength,
-            CancellationToken cancellationToken)
+        int maxLength,
+        CancellationToken cancellationToken)
     {
         if (this.currentReadBufferFromPool is not null)
         {
@@ -72,10 +73,10 @@ internal class TcpClientEndpoint : Endpoint
             this.currentReadBufferFromPool = ArrayPool<byte>.Shared.Rent(maxReceiveCount);
 
             int count = await this.stream.ReadAsync(
-                    this.currentReadBufferFromPool.AsMemory()
-                        [..(maxLength is -1 ? this.currentReadBufferFromPool.Length : maxReceiveCount)],
-                    cancellationToken)
-                    .ConfigureAwait(false);
+                this.currentReadBufferFromPool.AsMemory()
+                    [..(maxLength is -1 ? this.currentReadBufferFromPool.Length : maxReceiveCount)],
+                cancellationToken)
+                .ConfigureAwait(false);
 
             if (count > 0)
             {
@@ -114,7 +115,7 @@ internal class TcpClientEndpoint : Endpoint
             if (this.streamModifier is not null)
             {
                 var newStream = await this.streamModifier(ns, cancellationToken)
-                        .ConfigureAwait(false);
+                    .ConfigureAwait(false);
 
                 if (newStream is not null)
                     this.stream = newStream;
@@ -175,16 +176,16 @@ internal class TcpClientEndpoint : Endpoint
         if (textMessage)
         {
             throw new ArgumentException(
-                    "Only binary messages are supported with the TcpClientEndpoint.");
+                "Only binary messages are supported with the TcpClientEndpoint.");
         }
 
         try
         {
             await this.stream!.WriteAsync(message, cancellationToken)
-                    .ConfigureAwait(false);
+                .ConfigureAwait(false);
 
             await this.stream.FlushAsync(cancellationToken)
-                    .ConfigureAwait(false);
+                .ConfigureAwait(false);
         }
         catch
         {
