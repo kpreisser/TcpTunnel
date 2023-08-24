@@ -18,7 +18,8 @@ A working configuration consists of three nodes:
 For example, imagine you have some TCP service (like a VNC server) running on a machine within a LAN that
 has internet access (maybe only through NAT so it's not possible to use port forwarding or a VPN), and you
 want to securely connect to this service from a machine on another network.
-Additionally, you have a server (e.g. VPS) with a public domain and you have a SSL certificate for it.
+Additionally, you have a server (e.g. virtual private server, VPS) with a public domain and you have a
+SSL certificate for it.
 
 In this case, you could use the TcpTunnel with the following configuration:
 - Run the **Gateway** on the VPS and configure it to listen at a specific TCP port using SSL/TLS, and to
