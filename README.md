@@ -31,7 +31,7 @@ In this case, you could use the TcpTunnel with the following configuration:
   should get forwarded to the Proxy-Client to a specific target host and TCP port (like localhost:5900).
 
 The following image illustrates this scenario:
-![](tcptunnel-illustration.png)
+![](tcptunnel-illustration.svg?raw=1)
 
 ## Configuration
 
