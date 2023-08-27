@@ -4,7 +4,7 @@ TcpTunnel is a program implemented in C# (.NET 7.0) that allows to tunnel TCP co
 to a remote machine, for example to access services that are running behind a firewall or NAT
 (like a reverse-connect mechanism).
 
-A working configuration consists of three nodes:
+A working configuration consists of three instances:
 - **Gateway**: Runs on a (server) machine that is accessible for both proxy endpoints (e.g. on a public server).
   It listens for incoming TCP connections from the proxy endpoints (*proxy-client* and *proxy-server*) and forwards
   data from one proxy endpoint to the corresponding partner proxy endpoint.
@@ -37,7 +37,9 @@ The following image illustrates this scenario:
 
 TcpTunnel is configured via an XML file with the name `settings.xml` in the application's directory.
 When building the application, sample setting files will get copied to the output directory which you can
-use as a template.
+use as a template. You can also find them here for [Gateway](TcpTunnel/sample-settings-gateway.xml),
+[Proxy-Server](TcpTunnel/sample-settings-proxy-server.xml) and
+[Proxy-Client](TcpTunnel/sample-settings-proxy-client.xml).
 
 You can define multiple instances (e.g. a Gateway and a Proxy-Server instance) in the settings file, which
 will then be run by a single application process.
@@ -45,10 +47,12 @@ will then be run by a single application process.
 ## Features
 
 - Uses async I/O for high scalability.
-- Supports SSL/TLS and password authentication for connections from the Proxies to the Gateway.
+- Supports SSL/TLS and password authentication for secure connections between the Gateway and the Proxies.
 - Multiplexes multiple (tunneled) TCP connections over a single connection, similar to the stream concept in HTTP/2.
 - Uses flow control for the tunneled TCP connections (using a initial window size of 384 KiB), similar
   to the flow control mechanism in HTTP/2.
+- Multiple Proxy-Server instances can connect to a session, so it's possible to connect to the target
+  endpoints from different machines at the same time.
 - Automatically recovers after one of the nodes (*Gateway*, *Proxy-Server*, *Proxy-Client*) was temporarily unavailable.
 - On Windows, it can be installed as service.
 
