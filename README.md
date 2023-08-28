@@ -15,23 +15,24 @@ A working configuration consists of three instances:
   *Gateway* from the *Proxy-Server*. When receiving such a forwarded connection, it opens a TCP connection
   to the specified target endpoint and forwards the data to it.
 
-For example, imagine you have some TCP service (like a VNC server) running on a machine within a LAN that
-has internet access (maybe only through NAT so it's not possible to use port forwarding or a VPN), and you
-want to securely connect to this service from a machine on another network.
+For example, imagine you have some TCP services (like a VNC and a SSH server) running on a machine within a LAN
+that has internet access (maybe only through NAT so it's not possible to use port forwarding or a VPN), and you
+want to securely connect to this service from a machine on another network.<br>
 Additionally, you have a server (e.g. virtual private server, VPS) with a public domain and you have a
-SSL certificate for it.
+SSL/TLS certificate for it.
 
-In this case, you could use the TcpTunnel with the following configuration:
+In this case, you could use the TcpTunnel with a configuration as shown in the following image:
+
+![](tcptunnel-illustration.svg?raw=1)
+
+That is:
 - Run the **Gateway** on the VPS and configure it to listen at a specific TCP port using SSL/TLS, and to
   allow a session with an ID and password.
-- Run the **Proxy-Client** on the machine that has access to the TCP service (VNC server) and configure it to
-  connect to the host and port of the Gateway.
-- Run the **Proxy-Server** on your machine where you want to access the TCP service (VNC server), and configure
-  it to connect to the host and port of the Gateway, and to listen on a specific TCP port (like 5920) that
-  should get forwarded to the Proxy-Client to a specific target host and TCP port (like localhost:5900).
-
-The following image illustrates this scenario:
-![](tcptunnel-illustration.svg?raw=1)
+- Run the **Proxy-Client** on the machine that has access to the TCP services (VNC/SSH server), and configure
+  it to connect to the host and port of the Gateway.
+- Run the **Proxy-Server** on your machine where you want to access the TCP services (with a VNC/SSH client),
+  and configure it to connect to the host and port of the Gateway, and to listen on a specific TCP port (like 5920)
+  that should get forwarded to the Proxy-Client to a specific target host and TCP port (like 192.168.40.80:5900).
 
 ## Configuration
 
