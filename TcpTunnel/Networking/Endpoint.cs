@@ -171,7 +171,7 @@ internal abstract partial class Endpoint
     /// <returns>The next packet, or <c>null</c> of the client closed the connection</returns>
     /// <exception cref="Exception">If an I/O error occurs</exception>
     public abstract Task<ReceivedMessage?> ReceiveMessageAsync(
-        int maxLength, 
+        int maxLength,
         CancellationToken cancellationToken);
 
     /// <summary>
@@ -244,7 +244,7 @@ internal abstract partial class Endpoint
             // Call the callback that can receive data.
             await runEndpointCallback(this.CancellationToken).ConfigureAwait(false);
         }
-        catch
+        catch (Exception ex) when (ex.CanCatch())
         {
             isNormalClose = false;
 
@@ -280,7 +280,7 @@ internal abstract partial class Endpoint
                 // we would block the thread pool (as we are ourselves an async
                 // method running in a thread pool thread).
                 await this.sendQueueWorkerTask.ConfigureAwait(false);
-                
+
                 Thread.MemoryBarrier();
                 this.sendQueueWorkerTask = null;
             }
@@ -308,7 +308,7 @@ internal abstract partial class Endpoint
                 bool normalClose = isNormalClose && !this.CancellationToken.IsCancellationRequested;
                 await this.CloseCoreAsync(normalClose, this.CancellationToken).ConfigureAwait(false);
             }
-            catch
+            catch (Exception ex) when (ex.CanCatch())
             {
                 // Ignore.
             }
@@ -385,7 +385,7 @@ internal abstract partial class Endpoint
 
             this.sendQueueWorkerTask = ExceptionUtils.StartTask(
                 this.RunSendQueueWorkerTaskAsync);
-            
+
             // Ensure other threads calling SendMessageByQueue() can see the value.
             Thread.MemoryBarrier();
         }
@@ -510,7 +510,7 @@ internal abstract partial class Endpoint
                             await this.CloseCoreAsync(true, this.CancellationToken)
                                 .ConfigureAwait(false);
                         }
-                        catch
+                        catch (Exception ex) when (ex.CanCatch())
                         {
                             // Ignore.
                         }
@@ -529,7 +529,7 @@ internal abstract partial class Endpoint
                                 this.CancellationToken)
                                 .ConfigureAwait(false);
                         }
-                        catch
+                        catch (Exception ex) when (ex.CanCatch())
                         {
                             // The connection is probably already closed/aborted.
                             // Note: Don't return here as that will dispose the

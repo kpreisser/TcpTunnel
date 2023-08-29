@@ -19,14 +19,14 @@ For example, imagine you have some TCP services (like a VNC and a SSH server) ru
 that has internet access (maybe only through NAT so it's not possible to use port forwarding or a VPN), and you
 want to securely connect to this service from a machine on another network.<br>
 Additionally, you have a server (e.g. virtual private server, VPS) with a public domain and you have a
-SSL/TLS certificate for it.
+SSL (TLS) certificate for it.
 
 In this case, you could use the TcpTunnel with a configuration as shown in the following image:
 
 ![](tcptunnel-illustration.svg?raw=1)
 
 That is:
-- Run the **Gateway** on the VPS and configure it to listen at a specific TCP port using SSL/TLS, and to
+- Run the **Gateway** on the VPS and configure it to listen at a specific TCP port using SSL (TLS), and to
   allow a session with an ID and password.
 - Run the **Proxy-Client** on the machine that has access to the TCP services (VNC/SSH server), and configure
   it to connect to the host and port of the Gateway.
@@ -48,7 +48,7 @@ will then be run by a single application process.
 ## Features
 
 - Uses async I/O for high scalability.
-- Supports SSL/TLS and password authentication for secure connections between the Gateway and the Proxies.
+- Supports SSL (TLS) and password authentication for secure connections between the Gateway and the Proxies.
 - Multiplexes multiple (tunneled) TCP connections over a single connection, similar to the stream concept in HTTP/2.
 - Uses flow control for the tunneled TCP connections (using a initial window size of 384 KiB), similar
   to the flow control mechanism in HTTP/2.
@@ -60,7 +60,7 @@ will then be run by a single application process.
 ## Security Considerations
 
 - The Gateway can define one or more password-protected *sessions* (which associate a
-  Proxy-Client with one or more Proxy-Servers). In combination with enabling SSL/TLS in the Gateway and
+  Proxy-Client with one or more Proxy-Servers). In combination with enabling SSL (TLS) in the Gateway and
   the Proxies, this ensures the connections between the Proxies and the Gateway are secure, and only the
   intended Proxies can connect to each other.
 - You can specify different passwords for the Proxy-Client and the Proxy-Server(s) in the Gateway

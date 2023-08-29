@@ -93,7 +93,7 @@ internal class TcpClientFramingEndpoint : TcpClientEndpoint
 
             return message;
         }
-        catch
+        catch (Exception ex) when (ex.CanCatch())
         {
             // Ensure that a thread switch happens in case the current continuation is
             // called inline from CancellationTokenSource.Cancel(), which could lead to

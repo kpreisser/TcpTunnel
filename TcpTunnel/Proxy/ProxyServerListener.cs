@@ -49,14 +49,14 @@ internal class ProxyServerListener
 
                     listener.Start();
                 }
-                catch (Exception ex)
+                catch (Exception ex) when (ex.CanCatch())
                 {
                     // Stop() will dispose the underlying socket.
                     try
                     {
                         listener?.Stop();
                     }
-                    catch
+                    catch (Exception ex2) when (ex2.CanCatch())
                     {
                         // Ignore.
                     }
@@ -78,7 +78,7 @@ internal class ProxyServerListener
                 this.listeners.Add((listener, listenerTask));
             }
         }
-        catch
+        catch (Exception ex) when (ex.CanCatch())
         {
             // The CTS may already have been disposed (and cleared out) by Stop().
             this.listenersCts?.Dispose();

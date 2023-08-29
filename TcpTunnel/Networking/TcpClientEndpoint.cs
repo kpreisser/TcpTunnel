@@ -5,6 +5,8 @@ using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
 
+using TcpTunnel.Utils;
+
 namespace TcpTunnel.Networking;
 
 internal class TcpClientEndpoint : Endpoint
@@ -90,7 +92,7 @@ internal class TcpClientEndpoint : Endpoint
                 return null;
             }
         }
-        catch
+        catch (Exception ex) when (ex.CanCatch())
         {
             // Ensure that a thread switch happens in case the current continuation is
             // called inline from CancellationTokenSource.Cancel(), which could lead to
@@ -121,7 +123,7 @@ internal class TcpClientEndpoint : Endpoint
                     this.stream = newStream;
             }
         }
-        catch
+        catch (Exception ex) when (ex.CanCatch())
         {
             // Ensure that a thread switch happens in case the current continuation is
             // called inline from CancellationTokenSource.Cancel(), which could lead to
@@ -187,7 +189,7 @@ internal class TcpClientEndpoint : Endpoint
             await this.stream.FlushAsync(cancellationToken)
                 .ConfigureAwait(false);
         }
-        catch
+        catch (Exception ex) when (ex.CanCatch())
         {
             // Ensure that a thread switch happens in case the current continuation is
             // called inline from CancellationTokenSource.Cancel(), which could lead to

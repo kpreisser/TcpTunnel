@@ -89,14 +89,14 @@ public class Gateway : IInstance
 
                     listener.Start();
                 }
-                catch
+                catch (Exception ex) when (ex.CanCatch())
                 {
                     // Stop() will dispose the underlying socket.
                     try
                     {
                         listener?.Stop();
                     }
-                    catch
+                    catch (Exception ex2) when (ex2.CanCatch())
                     {
                         // Ignore.
                     }
@@ -115,7 +115,7 @@ public class Gateway : IInstance
                 this.activeListeners.Add((listener, listenerTask));
             }
         }
-        catch
+        catch (Exception ex) when (ex.CanCatch())
         {
             // The CTS may already have been disposed (and cleared out) by Stop().
             this.listenersCts?.Dispose();
@@ -209,7 +209,7 @@ public class Gateway : IInstance
                         {
                             await endpoint.RunEndpointAsync(handler.RunAsync, cancellationToken);
                         }
-                        catch
+                        catch (Exception ex) when (ex.CanCatch())
                         {
                             // Ignore.
                         }
@@ -219,7 +219,7 @@ public class Gateway : IInstance
                             {
                                 client.Dispose();
                             }
-                            catch
+                            catch (Exception ex) when (ex.CanCatch())
                             {
                                 // Ignore.
                             }
@@ -275,7 +275,7 @@ public class Gateway : IInstance
                         },
                         cancellationToken);
                 }
-                catch
+                catch (Exception ex) when (ex.CanCatch())
                 {
                     await sslStream.DisposeAsync();
                     throw;

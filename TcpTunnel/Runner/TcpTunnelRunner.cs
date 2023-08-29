@@ -252,7 +252,7 @@ namespace TcpTunnel.Runner
                     }
                 }
             }
-            catch
+            catch (Exception ex) when (ex.CanCatch())
             {
                 this.Stop();
                 throw;

@@ -225,7 +225,7 @@ public partial class Proxy : IInstance
                                         },
                                         cancellationToken);
                                 }
-                                catch
+                                catch (Exception ex) when (ex.CanCatch())
                                 {
                                     await sslStream.DisposeAsync();
                                     throw;
@@ -248,7 +248,7 @@ public partial class Proxy : IInstance
                         cancellationToken => this.RunEndpointAsync(tcpEndpoint, cancellationToken),
                         readTaskCancellationToken);
                 }
-                catch (Exception ex)
+                catch (Exception ex) when (ex.CanCatch())
                 {
                     // Ignore, and try again. This includes the case when an
                     // OperationCanceledException was thrown above, which might be caused by
@@ -262,7 +262,7 @@ public partial class Proxy : IInstance
                     {
                         client.Dispose();
                     }
-                    catch
+                    catch (Exception ex) when (ex.CanCatch())
                     {
                         // Ignore
                     }
@@ -484,6 +484,8 @@ public partial class Proxy : IInstance
 
                         if (connection is not null)
                         {
+                            bool abortTunnelConnectionDueToError = false;
+
                             if (coreMessage.Length >= 1 &&
                                 coreMessage.Span[0] is ProxyMessageTypeData)
                             {
@@ -494,13 +496,23 @@ public partial class Proxy : IInstance
                                 var newPacket = new byte[coreMessage.Length - 1];
                                 coreMessage[1..].CopyTo(newPacket);
 
-                                // This will throw if the data to be queued would exceed the
-                                // initial window size, which cannot happen if the partner proxy
-                                // works correctly. Similar to the case with UpdateReceiveWindow(),
-                                // we will abort the connection to the gateway.
-                                connection.EnqueueTransmitData(newPacket);
+                                try
+                                {
+                                    connection.EnqueueTransmitData(newPacket);
+                                }
+                                catch (ArgumentException)
+                                {
+                                    // An argument exception means the passed data length or
+                                    // window size would exceed the allowed size, which means
+                                    // the partner proxy doesn't work correctly or might be
+                                    // malicious. In that case, we abort the tunnel connection
+                                    // (not the whole connection to the gateway, because when
+                                    // we are the proxy-client that can possibly handle
+                                    // multiple connections, this would also affect connections
+                                    // from other proxy-servers).
+                                    abortTunnelConnectionDueToError = true;
+                                }
                             }
-
                             else if (coreMessage.Length >= 1 + sizeof(int) &&
                                 coreMessage.Span[0] is ProxyMessageTypeUpdateWindow)
                             {
@@ -508,21 +520,32 @@ public partial class Proxy : IInstance
                                 int windowSize = BinaryPrimitives.ReadInt32BigEndian(
                                     coreMessage.Span[1..]);
 
-                                // This will throw if the window size to be queued would exceed
-                                // the allowed range; see comment above.
-                                connection.UpdateReceiveWindow(windowSize);
+                                try
+                                {
+                                    connection.UpdateReceiveWindow(windowSize);
+                                }
+                                catch (ArgumentException)
+                                {
+                                    // See comments above.
+                                    abortTunnelConnectionDueToError = true;
+                                }
                             }
-                            else if (coreMessage.Length >= 1 &&
+
+                            if (abortTunnelConnectionDueToError ||
+                                coreMessage.Length >= 1 &&
                                 coreMessage.Span[0] is ProxyMessageTypeAbortConnection)
                             {
                                 // Abort the connection, which will reset it immediately. We
                                 // use StopAsync() to ensure the connection is removed from
                                 // the list of active connections before we continue.
-                                // Because the abort has been initiated by the partner proxy,
-                                // we try to suppress sending the abort message (as the
-                                // partner already knows about the abort).
-                                connection.Data.SuppressSendAbortMessage = true;
-                                Thread.MemoryBarrier();
+                                if (!abortTunnelConnectionDueToError)
+                                {
+                                    // Because the abort has been initiated by the partner
+                                    // proxy, we try to suppress sending the abort message
+                                    // (as the partner already knows about the abort).
+                                    connection.Data.SuppressSendAbortMessage = true;
+                                    Thread.MemoryBarrier();
+                                }
 
                                 await connection.StopAsync();
                             }
@@ -745,7 +768,7 @@ public partial class Proxy : IInstance
                     client.Client.Close(0);
                     client.Dispose();
                 }
-                catch
+                catch (Exception ex) when (ex.CanCatch())
                 {
                     // Ignore.
                 }

@@ -91,7 +91,7 @@ internal class ProxyTunnelConnection<T>
     /// 
     /// </summary>
     /// <param name="data"></param>
-    /// <exception cref="InvalidOperationException">
+    /// <exception cref="ArgumentException">
     /// The queued data's length would exceed the initial window size.
     /// </exception>
     public void EnqueueTransmitData(ReadOnlyMemory<byte> data)
@@ -107,7 +107,7 @@ internal class ProxyTunnelConnection<T>
             // transmit window. Otherwise, the partner proxy wouldn't work
             // correctly or might be malicious.
             if (data.Length > this.transmitWindowAvailable)
-                throw new InvalidOperationException("The data would exceed the available transmit window size.");
+                throw new ArgumentException("The data would exceed the available transmit window size.");
 
             this.transmitWindowAvailable -= data.Length;
             this.transmitDataQueue.Enqueue(data);
@@ -129,7 +129,7 @@ internal class ProxyTunnelConnection<T>
 
             // The new window size must not be greater than the initial window size.
             if (resultingWindow > Constants.InitialWindowSize || resultingWindow < newWindow)
-                throw new InvalidOperationException();
+                throw new ArgumentException();
 
             // Additionally, release the semaphore if the receive task is waiting
             // for it.
@@ -205,7 +205,7 @@ internal class ProxyTunnelConnection<T>
                         if (received is 0)
                             break; // Connection has been closed.
 
-                        currentWindow -= received;                        
+                        currentWindow -= received;
                     }
                     finally
                     {
@@ -213,7 +213,7 @@ internal class ProxyTunnelConnection<T>
                     }
                 }
             }
-            catch
+            catch (Exception ex) when (ex.CanCatch())
             {
                 // Ensure that a thread switch happens in case the current continuation is
                 // called inline from CancellationTokenSource.Cancel(), which could lead to
@@ -274,7 +274,7 @@ internal class ProxyTunnelConnection<T>
 
                 this.remoteClient.Dispose();
             }
-            catch
+            catch (Exception ex) when (ex.CanCatch())
             {
                 // Ignore
             }
@@ -345,7 +345,7 @@ internal class ProxyTunnelConnection<T>
                 }
             }
         }
-        catch
+        catch (Exception ex) when (ex.CanCatch())
         {
             // Ensure that a thread switch happens in case the current continuation is
             // called inline from CancellationTokenSource.Cancel(), in which case we
