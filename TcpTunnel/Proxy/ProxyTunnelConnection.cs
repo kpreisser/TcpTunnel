@@ -363,6 +363,10 @@ internal class ProxyTunnelConnection<T>
             lock (this.syncRoot)
             {
                 this.transmitTaskStopped = true;
+
+                // At this stage, no more messages will be added to the transmit queue, so we
+                // clear it.
+                this.transmitDataQueue.Clear();
             }
         }
     }

@@ -23,24 +23,24 @@ namespace TcpTunnel.Gateway;
  * - Proxy-Server: Listens on the specified IP/Port combinations for incoming TCP connections, and then sends the connection request to the partner proxy-client.
  * 
  * PROTOCOL (Frame Payload) GATEWAY COMMUNICATION:
- * 0x00: (Proxy to Gateway) Authentication + Proxy-Type (0x01 for proxy-server) + Login-Prerequisite-String + Session-ID (int) + Session-Password
- * 0x01: (Gateway to Proxy) Authentication Result.
+ * - 0x00: (Proxy to Gateway) Authentication + Proxy-Type (0x01 for proxy-server) + Login-Prerequisite-String + Session-ID (int) + Session-Password
+ * - 0x01: (Gateway to Proxy) Authentication Result.
  *     - 0x00: Auth failed.
  *     - 0x01: Auth successful.
- * 0x02: (Gateway to Proxy) Session Status (sent after successful authentication if partner proxies are available, and during runtime if status changes):
+ * - 0x02: (Gateway to Proxy) Session Status (sent after successful authentication if partner proxies are available, and during runtime if status changes):
  *     + [if proxy is proxy-client) Partner Proxy ID (Int64)
  *     + 0x01: Partner proxy is available (in case of proxy-server, this means the proxy needs to acknowledge the new session iteration) or 0x00: Partner proxy is unavailable.
- * 0x03 (Proxy to Gateway): [if proxy is proxy-server] Acknowledge new session iteration after being informed that the partner proxy is now available.
- * 0x20 (both directions): Proxy-to-Proxy communication. The gateway forwards the packet to the partner proxy if available [and, in case of proxy-server, if current session iteration has been acknowledged].
+ * - 0x03 (Proxy to Gateway): [if proxy is proxy-server] Acknowledge new session iteration after being informed that the partner proxy is now available.
+ * - 0x20 (both directions): Proxy-to-Proxy communication. The gateway forwards the packet to the partner proxy if available [and, in case of proxy-server, if current session iteration has been acknowledged].
  *     + [if sending/receiving proxy is proxy-client] Partner Proxy ID (Int64)
  *     + Further payload is defined by PROXY-TO-PROXY COMMUNICATION.
  * 
- * 0xFF: Reserved for Ping.
+ * - 0xFF: Reserved for Ping.
  */
 internal class GatewayProxyConnectionHandler
 {
     private readonly Gateway gateway;
-    private readonly TcpClientFramingEndpoint endpoint;
+    private readonly TcpClientFramingConnection endpoint;
     private readonly SystemNetEndpoint clientEndpoint;
 
     private long proxyId;
@@ -50,7 +50,7 @@ internal class GatewayProxyConnectionHandler
 
     public GatewayProxyConnectionHandler(
         Gateway gateway,
-        TcpClientFramingEndpoint endpoint,
+        TcpClientFramingConnection endpoint,
         SystemNetEndpoint clientEndpoint)
     {
         this.gateway = gateway;
@@ -58,7 +58,7 @@ internal class GatewayProxyConnectionHandler
         this.clientEndpoint = clientEndpoint;
     }
 
-    public TcpClientFramingEndpoint Endpoint
+    public TcpClientFramingConnection Endpoint
     {
         get => this.endpoint;
     }

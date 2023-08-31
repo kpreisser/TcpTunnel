@@ -192,7 +192,7 @@ public class Gateway : IInstance
                 var remoteEndpoint = client.Client.RemoteEndPoint!;
                 this.logger?.Invoke($"Accepted connection from '{remoteEndpoint}'.");
 
-                var endpoint = new TcpClientFramingEndpoint(
+                var endpoint = new TcpClientFramingConnection(
                     client,
                     useSendQueue: true,
                     usePingTimer: true,
@@ -207,7 +207,7 @@ public class Gateway : IInstance
                     {
                         try
                         {
-                            await endpoint.RunEndpointAsync(handler.RunAsync, cancellationToken);
+                            await endpoint.RunConnectionAsync(handler.RunAsync, cancellationToken);
                         }
                         catch (Exception ex) when (ex.CanCatch())
                         {

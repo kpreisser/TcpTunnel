@@ -9,7 +9,7 @@ using TcpTunnel.Utils;
 
 namespace TcpTunnel.Networking;
 
-internal class TcpClientEndpoint : Endpoint
+internal class TcpClientConnection : Connection
 {
     private readonly Func<CancellationToken, ValueTask>? connectHandler;
 
@@ -23,7 +23,7 @@ internal class TcpClientEndpoint : Endpoint
 
     private byte[]? currentReadBufferFromPool;
 
-    public TcpClientEndpoint(
+    public TcpClientConnection(
         TcpClient client,
         bool useSendQueue,
         bool usePingTimer,

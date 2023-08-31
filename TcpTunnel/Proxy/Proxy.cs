@@ -20,10 +20,11 @@ namespace TcpTunnel.Proxy;
 
 /**
  * PROXY-TO-PROXY COMMUNICATION:
- * 8 bytes ConnectionID + 0x00 + 4 bytes port + utf-8 string Host: Open a new connection.
- * 8 bytes ConnectionID + 0x01 + arbitrary bytes: Transmit data packet or shutdown the connection if arbitrary bytes's length is 0.
- * 8 bytes ConnectionID + 0x02: Abort the connection.
- * 8 bytes ConnectionID + 0x03 + 4 bytes window size: Update receive window.
+ * - 8 bytes ConnectionID + 0x00 + 4 bytes port + utf-8 string Host: Open a new connection.
+ * - 8 bytes ConnectionID + 0x01 + arbitrary bytes: Transmit data packet or shutdown the
+ *   connection if arbitrary bytes's length is 0.
+ * - 8 bytes ConnectionID + 0x02: Abort the connection.
+ * - 8 bytes ConnectionID + 0x03 + 4 bytes window size: Update receive window.
  */
 public partial class Proxy : IInstance
 {
@@ -61,7 +62,7 @@ public partial class Proxy : IInstance
 
     private Task? readTask;
     private CancellationTokenSource? readTaskCts;
-    private TcpClientFramingEndpoint? tcpEndpoint;
+    private TcpClientFramingConnection? tcpEndpoint;
 
     private ProxyServerListener? listener;
 
@@ -69,7 +70,8 @@ public partial class Proxy : IInstance
     /// The dictionary of active connections.
     /// </summary>
     private readonly Dictionary<long /* proxyId */,
-        Dictionary<long /* connectionId */, ProxyTunnelConnection<TunnelConnectionData>>> activePartnerProxiesAndConnections = new();
+        Dictionary<long /* connectionId */, ProxyTunnelConnection<TunnelConnectionData>>> activePartnerProxiesAndConnections =
+        new();
 
     public Proxy(
         string gatewayHost,
@@ -187,7 +189,7 @@ public partial class Proxy : IInstance
                 var caughtException = default(Exception);
                 try
                 {
-                    var tcpEndpoint = new TcpClientFramingEndpoint(
+                    var tcpEndpoint = new TcpClientFramingConnection(
                         client,
                         useSendQueue: true,
                         usePingTimer: false,
@@ -244,8 +246,8 @@ public partial class Proxy : IInstance
                             return modifiedStream;
                         });
 
-                    await tcpEndpoint.RunEndpointAsync(
-                        cancellationToken => this.RunEndpointAsync(tcpEndpoint, cancellationToken),
+                    await tcpEndpoint.RunConnectionAsync(
+                        cancellationToken => this.RunConnectionAsync(tcpEndpoint, cancellationToken),
                         readTaskCancellationToken);
                 }
                 catch (Exception ex) when (ex.CanCatch())
@@ -292,7 +294,7 @@ public partial class Proxy : IInstance
 
     private async Task RunPingTaskAsync(
         SemaphoreSlim pingTimerSemaphore,
-        TcpClientFramingEndpoint endpoint)
+        TcpClientFramingConnection endpoint)
     {
         while (true)
         {
@@ -304,7 +306,9 @@ public partial class Proxy : IInstance
         }
     }
 
-    private async Task RunEndpointAsync(TcpClientFramingEndpoint endpoint, CancellationToken cancellationToken)
+    private async Task RunConnectionAsync(
+        TcpClientFramingConnection endpoint,
+        CancellationToken cancellationToken)
     {
         using var pingTimerSemaphore = new SemaphoreSlim(0);
         var pingTimerTask = default(Task);
@@ -573,7 +577,7 @@ public partial class Proxy : IInstance
     }
 
     private void StartTcpTunnelConnection(
-        TcpClientFramingEndpoint endpoint,
+        TcpClientFramingConnection endpoint,
         long partnerProxyId,
         Dictionary<long, ProxyTunnelConnection<TunnelConnectionData>> activeConnections,
         long connectionId,
@@ -688,7 +692,7 @@ public partial class Proxy : IInstance
         connection.Start();
     }
 
-    private void HandlePartnerProxyAvailable(TcpClientFramingEndpoint endpoint, long partnerProxyId)
+    private void HandlePartnerProxyAvailable(TcpClientFramingConnection endpoint, long partnerProxyId)
     {
         lock (this.syncRoot)
         {

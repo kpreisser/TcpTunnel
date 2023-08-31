@@ -2,7 +2,7 @@
 
 namespace TcpTunnel.Networking;
 
-internal abstract partial class Endpoint
+internal abstract partial class Connection
 {
     private struct MessageQueueElement
     {
@@ -10,8 +10,6 @@ internal abstract partial class Endpoint
 
         public bool IsTextMessage;
 
-        public bool IsQueueEndElement;
-
-        public bool EnterFaultedState;
+        public bool ExitSendTask;
     }
 }

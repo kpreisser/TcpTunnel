@@ -11,13 +11,13 @@ using TcpTunnel.Utils;
 namespace TcpTunnel.Networking;
 
 /// <summary>
-/// An endpoint that frames messages using a 4 byte length prefix.
+/// An TCP connection that frames messages using a 4 byte length prefix.
 /// </summary>
-internal class TcpClientFramingEndpoint : TcpClientEndpoint
+internal class TcpClientFramingConnection : TcpClientConnection
 {
     private byte[]? currentReadBufferFromPool;
 
-    public TcpClientFramingEndpoint(
+    public TcpClientFramingConnection(
         TcpClient client,
         bool useSendQueue,
         bool usePingTimer,

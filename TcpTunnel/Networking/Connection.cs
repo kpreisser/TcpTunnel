@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -13,10 +14,12 @@ namespace TcpTunnel.Networking;
 /// TCP socket.
 /// </summary>
 /// <remarks>
-/// It is possible to call Send methods while a Receive operation is still in progress
-/// and vice versa.
+/// The connection has a built-in send queue that can be used to queue packets to
+/// be sent without having to wait for the previous send operation to finish.
+/// Additionally, a ping timer is implemented which can be used to detect whether
+/// the peer is still available.
 /// </remarks>
-internal abstract partial class Endpoint
+internal abstract partial class Connection
 {
     // TODO: Make this configurable.
     /// <summary>
@@ -25,8 +28,8 @@ internal abstract partial class Endpoint
     /// <see cref="MinSendQueueItemCountForByteLengthCheck"/>.
     /// </summary>
     /// <remarks>
-    /// This is to prevent us from buffering more data endlessly if the remote endpoint
-    /// doesn't read from the socket. However, the limit is relatively large to not
+    /// This is to prevent us from buffering more data endlessly if the peer doesn't
+    /// read from the socket. However, the limit is relatively large to not
     /// erroneously abort the connection when we actually want to send that much messages.
     /// </remarks>
     private const long MaxSendQueueByteLength = 50 * 1024 * 1024;
@@ -49,18 +52,15 @@ internal abstract partial class Endpoint
     private readonly bool useSendQueue;
     private readonly bool usePingTimer;
 
-    private readonly object sendQueueSemaphoreSyncRoot = new();
+    private readonly object sendQueueSyncRoot = new();
 
     private CancellationTokenSource? cancellationTokenSource;
 
-    private ConcurrentQueue<MessageQueueElement>? sendQueue;
-    private ConcurrentQueue<MessageQueueElement>? sendQueueHighPriority;
+    private Queue<MessageQueueElement>? sendQueue;
+    private Queue<MessageQueueElement>? sendQueueHighPriority;
     private SemaphoreSlim? sendQueueSemaphore;
-    private bool sendQueueSemaphoreIsDisposed;
+    private bool sendStopped;
 
-    // We use memory barriers when accessing this field, because it's checked in
-    // SendMessageByQueue() which might be called from different threads, and we set
-    // and clear the field from within RunEndpointAsync().
     private Task? sendQueueWorkerTask;
     private long sendQueueByteLength; // accumulated byte length of queued messages
 
@@ -70,7 +70,7 @@ internal abstract partial class Endpoint
 
     private bool ignorePingTimeout;
 
-    protected Endpoint(bool useSendQueue, bool usePingTimer)
+    protected Connection(bool useSendQueue, bool usePingTimer)
         : base()
     {
         this.useSendQueue = useSendQueue;
@@ -93,21 +93,18 @@ internal abstract partial class Endpoint
     }
 
     /// <summary>
-    /// Enqueues the given message to be sent to the client. This method is thread-safe.
+    /// Enqueues the given message to be sent to the peer. This method is thread-safe.
     /// </summary>
     /// <remarks>
-    /// This method does not block because it adds the message to
-    /// a internal queue, from which a sender task takes the messages and calls
+    /// <para>
+    /// This method does not block, because it adds the message to
+    /// a internal queue from which a sender task takes the messages and calls
     /// <see cref="SendMessageCoreAsync(Memory{byte}, bool, CancellationToken)"/>.
-    /// This method can be called from multiple threads at the same time.
-    /// 
-    /// This is to avoid one client blocking all other clients when it does not read data
-    /// and the send method uses locking instead of a separate task and queue.
-    /// 
-    /// If the client does not read data and the queued data exceeds a specific amount,
-    /// the connection is aborted.
-    /// 
-    /// This method can throw exceptions if the connection has been aborted.
+    /// </para>
+    /// <para>
+    /// If the peer does not read data and the queued data exceeds a specific amount,
+    /// the connection will be aborted.
+    /// </para>
     /// </remarks>
     /// <param name="message"></param>
     /// <param name="highPriority">
@@ -137,11 +134,11 @@ internal abstract partial class Endpoint
     }
 
     /// <summary>
-    /// Sends a message asynchronously to the client. The returned task completes when
-    /// the message has been sent completely to the client.
+    /// Sends a message asynchronously to the peer. You can only call this method again
+    /// once the returned <see cref="Task"/> is completed.
     /// </summary>
     /// <remarks>
-    /// This method can only be called if useSendQueue is false.
+    /// This method can only be called if <c>useSendQueue</c> was passed as <c>false</c>.
     /// </remarks>
     /// <param name="message">The message to send.</param>
     public ValueTask SendMessageAsync(string message)
@@ -175,7 +172,7 @@ internal abstract partial class Endpoint
         CancellationToken cancellationToken);
 
     /// <summary>
-    /// Resets the ping timer after receiving a client's PING message.
+    /// Resets the ping timer after receiving a client's ping message.
     /// </summary>
     public void HandlePing()
     {
@@ -210,17 +207,17 @@ internal abstract partial class Endpoint
     }
 
     /// <summary>
-    /// Runs this endpoint asynchronously.
+    /// Runs this connection asynchronously.
     /// </summary>
     /// <remarks>
     /// You may call <see cref="SendMessageByQueue(byte[], bool)"/> (and other overloads)
-    /// only while the <paramref name="runEndpointCallback"/> is executing.
+    /// only while the <paramref name="runConnectionCallback"/> hasn't completed.
     /// </remarks>
-    /// <param name="runEndpointCallback"></param>
+    /// <param name="runConnectionCallback"></param>
     /// <param name="cancellationToken"></param>
     /// <returns></returns>
-    public async Task RunEndpointAsync(
-        Func<CancellationToken, Task> runEndpointCallback,
+    public async Task RunConnectionAsync(
+        Func<CancellationToken, Task> runConnectionCallback,
         CancellationToken cancellationToken = default)
     {
         // First, create the CTS as it might be needed by the ping task.
@@ -230,19 +227,20 @@ internal abstract partial class Endpoint
 
         // Start the ping task before running initalize (which e.g. might want
         // to negotiate SSL/TLS, which might already timeout, but we must not
-        // yet send over this channel).
+        // yet send over this channel from the send task).
         this.StartPingTask();
 
         bool isNormalClose = true;
         try
         {
-            await this.HandleInitializationAsync(this.CancellationToken).ConfigureAwait(false);
+            await this.HandleInitializationAsync(this.CancellationToken)
+                .ConfigureAwait(false);
 
-            // After InitilaizeAsync() is finished, we can now start to send data.
+            // After HandleInitializationAsync() is finished, we can now start to send data.
             this.StartSendTask();
 
             // Call the callback that can receive data.
-            await runEndpointCallback(this.CancellationToken).ConfigureAwait(false);
+            await runConnectionCallback(this.CancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex.CanCatch())
         {
@@ -258,19 +256,16 @@ internal abstract partial class Endpoint
         {
             if (this.sendQueueWorkerTask is not null)
             {
-                // Allow the send task to exit.
-                this.sendQueue!.Enqueue(new MessageQueueElement()
+                // Allow the send task to exit (we will close the connection later).
+                lock (this.sendQueueSyncRoot)
                 {
-                    IsQueueEndElement = true
-                });
-
-                // Need to lock to ensure the sender task doesn't dispose the
-                // semaphore while we might still be in the Release() call.
-                lock (this.sendQueueSemaphoreSyncRoot)
-                {
-                    if (!this.sendQueueSemaphoreIsDisposed)
-                        this.sendQueueSemaphore!.Release();
+                    this.sendQueue!.Enqueue(new MessageQueueElement()
+                    {
+                        ExitSendTask = true
+                    });
                 }
+
+                this.sendQueueSemaphore!.Release();
 
                 // Wait for the send task to complete. We wait asynchronously
                 // because it could take some time (if it takes too long, the
@@ -280,9 +275,11 @@ internal abstract partial class Endpoint
                 // we would block the thread pool (as we are ourselves an async
                 // method running in a thread pool thread).
                 await this.sendQueueWorkerTask.ConfigureAwait(false);
+                this.sendQueueSemaphore.Dispose();
+                this.sendQueueSemaphore = null;
 
-                Thread.MemoryBarrier();
-                this.sendQueueWorkerTask = null;
+                lock (this.sendQueueSyncRoot)
+                    this.sendQueueWorkerTask = null;
             }
 
             // Stop the ping timer.
@@ -306,7 +303,8 @@ internal abstract partial class Endpoint
                 // Treat it as abnormal close if the cancellation token was cancelled
                 // in the meanwhile.
                 bool normalClose = isNormalClose && !this.CancellationToken.IsCancellationRequested;
-                await this.CloseCoreAsync(normalClose, this.CancellationToken).ConfigureAwait(false);
+                await this.CloseCoreAsync(normalClose, this.CancellationToken)
+                    .ConfigureAwait(false);
             }
             catch (Exception ex) when (ex.CanCatch())
             {
@@ -354,7 +352,9 @@ internal abstract partial class Endpoint
     /// <paramref name="normalClose"/> being <c>true</c>.
     /// </remarks>
     /// <returns></returns>
-    protected abstract ValueTask CloseCoreAsync(bool normalClose, CancellationToken cancellationToken);
+    protected abstract ValueTask CloseCoreAsync(
+        bool normalClose,
+        CancellationToken cancellationToken);
 
     private void StartPingTask()
     {
@@ -376,18 +376,18 @@ internal abstract partial class Endpoint
         if (this.useSendQueue)
         {
             // Start a send task.
-            this.sendQueue = new ConcurrentQueue<MessageQueueElement>();
-            this.sendQueueHighPriority = new ConcurrentQueue<MessageQueueElement>();
+            this.sendQueue = new Queue<MessageQueueElement>();
+            this.sendQueueHighPriority = new Queue<MessageQueueElement>();
             this.sendQueueSemaphore = new SemaphoreSlim(0);
 
             // Ensure the task can see the fields.
             Thread.MemoryBarrier();
 
-            this.sendQueueWorkerTask = ExceptionUtils.StartTask(
-                this.RunSendQueueWorkerTaskAsync);
-
-            // Ensure other threads calling SendMessageByQueue() can see the value.
-            Thread.MemoryBarrier();
+            lock (this.sendQueueSyncRoot)
+            {
+                this.sendQueueWorkerTask = ExceptionUtils.StartTask(
+                    this.RunSendQueueWorkerTaskAsync);
+            }
         }
     }
 
@@ -397,55 +397,42 @@ internal abstract partial class Endpoint
             bool highPriority)
     {
         if (!this.useSendQueue)
-            throw new InvalidOperationException("Only blocking writes are supported.");
+            throw new InvalidOperationException("Only non-queued writes are supported.");
 
-        Thread.MemoryBarrier();
-        if (this.sendQueueWorkerTask is null)
+        bool cancelConnection = false;
+        lock (this.sendQueueSyncRoot)
         {
-            throw new InvalidOperationException(
-                "Endpoint has not yet been initialized or has already stopped. " +
-                $"You may call this method only while the callback passed to " +
-                $"{nameof(RunEndpointAsync)} is executing.");
-        }
-
-        // If the size of queued messages was not too large, add the message to the queue.
-        // Note: If this method is called again, the length of the next message will be
-        // added again to the string length; therefore it is declared as long.
-        if (message is not null)
-        {
-            long existingQueueStrLength = Interlocked.Add(
-                ref this.sendQueueByteLength,
-                message.Value.Length) -
-                message.Value.Length;
-
-            if (this.sendQueue!.Count >= MinSendQueueItemCountForByteLengthCheck &&
-                existingQueueStrLength > MaxSendQueueByteLength)
+            if (this.sendQueueWorkerTask is null)
             {
-                // The queue is too large. Abort the connection; and ensure the SendTask does
-                // not send anything after the last message (in case the queue is emptied in
-                // the meanwhile and this method is called again)
-                lock (this.sendQueueSemaphoreSyncRoot)
-                {
-                    if (!this.sendQueueSemaphoreIsDisposed)
-                    {
-                        this.sendQueue.Enqueue(new MessageQueueElement()
-                        {
-                            EnterFaultedState = true
-                        });
-
-                        this.sendQueueSemaphore!.Release();
-                    }
-                }
-
-                this.Cancel();
-                return;
+                throw new InvalidOperationException(
+                    $"Connection has not yet been initialized or has already stopped. " +
+                    $"You may call this method only while the callback passed to " +
+                    $"{nameof(RunConnectionAsync)} is executing.");
             }
-        }
 
-        lock (this.sendQueueSemaphoreSyncRoot)
-        {
-            // If the send task has already exited, ingore the message.
-            if (!this.sendQueueSemaphoreIsDisposed)
+            // If the send task has already exited, ignore the message.
+            if (this.sendStopped)
+                return;
+
+            if (message is not null)
+            {
+                int messageLength = message.Value.Length;
+
+                if (this.sendQueue!.Count >= MinSendQueueItemCountForByteLengthCheck &&
+                    messageLength > MaxSendQueueByteLength - this.sendQueueByteLength)
+                {
+                    // The queue would be too large. Abort the connection and ensure
+                    // no more data will be queued.
+                    this.sendStopped = true;
+                    cancelConnection = true;
+                }
+                else
+                {
+                    this.sendQueueByteLength += messageLength;
+                }
+            }
+
+            if (!cancelConnection)
             {
                 // Enqueue the message.
                 // Elements with a high priority will be removed from the send
@@ -460,12 +447,18 @@ internal abstract partial class Endpoint
                 this.sendQueueSemaphore!.Release();
             }
         }
+
+        if (cancelConnection)
+        {
+            // Cancel the connection outside of the lock.
+            this.Cancel();
+        }
     }
 
     private ValueTask SendMessageAsync(Memory<byte>? message, bool textMessage)
     {
         if (this.useSendQueue)
-            throw new InvalidOperationException("Only non-blocking writes are supported.");
+            throw new InvalidOperationException("Only queued writes are supported.");
 
         if (message is null)
             return this.CloseCoreAsync(true, this.CancellationToken);
@@ -477,85 +470,57 @@ internal abstract partial class Endpoint
     {
         try
         {
-            bool isFaulted = false;
-
             while (true)
             {
-                // We don't pass the cancellation token here as we don't want to
-                // break immediately when endpoint was canceled; instead we wait
-                // for the queue end element to be added by the receiver task.
-                await this.sendQueueSemaphore!.WaitAsync().ConfigureAwait(false);
+                await this.sendQueueSemaphore!.WaitAsync(this.CancellationToken)
+                    .ConfigureAwait(false);
 
-                // Process elements with a high priority first.
-                if (!this.sendQueueHighPriority!.TryDequeue(out var el))
+                MessageQueueElement el;
+                lock (this.sendQueueSyncRoot)
                 {
-                    // If no element with high priority is avaiable, process the
-                    // next regular element.
-                    if (!this.sendQueue!.TryDequeue(out el))
-                        throw new InvalidOperationException(); // Should never happen
+                    // Process elements with a high priority first.
+                    if (!this.sendQueueHighPriority!.TryDequeue(out el))
+                        el = this.sendQueue!.Dequeue();
+
+                    if (el.ExitSendTask)
+                        return;
+
+                    if (el.Message is not null)
+                        this.sendQueueByteLength -= el.Message.Value.Length;
                 }
 
-                if (el.EnterFaultedState)
-                    isFaulted = true;
+                if (el.Message is null)
+                {
+                    // Close the connection and return.
+                    await this.CloseCoreAsync(true, this.CancellationToken)
+                        .ConfigureAwait(false);
 
-                if (el.IsQueueEndElement)
                     return;
-
-                if (!isFaulted)
-                {
-                    if (el.Message is null)
-                    {
-                        try
-                        {
-                            await this.CloseCoreAsync(true, this.CancellationToken)
-                                .ConfigureAwait(false);
-                        }
-                        catch (Exception ex) when (ex.CanCatch())
-                        {
-                            // Ignore.
-                        }
-
-                        isFaulted = true;
-                    }
-                    else
-                    {
-                        Interlocked.Add(ref this.sendQueueByteLength, -el.Message.Value.Length);
-
-                        try
-                        {
-                            await this.SendMessageCoreAsync(
-                                el.Message.Value,
-                                el.IsTextMessage,
-                                this.CancellationToken)
-                                .ConfigureAwait(false);
-                        }
-                        catch (Exception ex) when (ex.CanCatch())
-                        {
-                            // The connection is probably already closed/aborted.
-                            // Note: Don't return here as that will dispose the
-                            // messageQueueSemaphore, which will then cause the code in
-                            // OnHandleClose() to throw a exception as it will expect that
-                            // the semaphore is still active and try to release it. Also the
-                            // queue might overflow. Instead, we ignore further writes so
-                            // that the SendTask continues until a QueueEndElement is received.
-                            isFaulted = true;
-                        }
-                    }
                 }
+
+                await this.SendMessageCoreAsync(
+                    el.Message.Value,
+                    el.IsTextMessage,
+                    this.CancellationToken)
+                    .ConfigureAwait(false);
             }
+        }
+        catch (Exception ex) when (ex.CanCatch())
+        {
+            // Ensure that a thread switch happens in case the current continuation is
+            // called inline from CancellationTokenSource.Cancel(), which could lead to
+            // deadlocks in certain situations (e.g. when holding some lock).
+            await Task.Yield();
         }
         finally
         {
-            lock (this.sendQueueSemaphoreSyncRoot)
+            lock (this.sendQueueSyncRoot)
             {
-                this.sendQueueSemaphoreIsDisposed = true;
-                this.sendQueueSemaphore!.Dispose();
-            }
+                this.sendStopped = true;
 
-            // At this stage, no more messages will be added to the send queue, so we
-            // empty it.
-            while (this.sendQueue!.TryDequeue(out _))
-            {
+                // At this stage, no more messages will be added to the send queue, so we
+                // clear it.
+                this.sendQueue!.Clear();
             }
         }
     }
