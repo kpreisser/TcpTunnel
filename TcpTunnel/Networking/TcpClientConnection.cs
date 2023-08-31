@@ -178,7 +178,7 @@ internal class TcpClientConnection : Connection
         if (textMessage)
         {
             throw new ArgumentException(
-                "Only binary messages are supported with the TcpClientEndpoint.");
+                $"Only binary messages are supported with the {nameof(TcpClientConnection)}.");
         }
 
         try
