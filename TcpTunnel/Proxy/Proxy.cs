@@ -65,7 +65,7 @@ public partial class Proxy : IInstance
 
     private Task? readTask;
     private CancellationTokenSource? readTaskCts;
-    private TcpClientFramingConnection? tcpEndpoint;
+    private TcpClientFramingConnection? gatewayConnection;
 
     private ProxyServerListener? listener;
 
@@ -192,7 +192,7 @@ public partial class Proxy : IInstance
                 var caughtException = default(Exception);
                 try
                 {
-                    var tcpEndpoint = new TcpClientFramingConnection(
+                    var gatewayConnection = new TcpClientFramingConnection(
                         client,
                         useSendQueue: true,
                         usePingTimer: false,
@@ -249,15 +249,15 @@ public partial class Proxy : IInstance
                             return modifiedStream;
                         });
 
-                    await tcpEndpoint.RunConnectionAsync(
-                        cancellationToken => this.RunConnectionAsync(tcpEndpoint, cancellationToken),
+                    await gatewayConnection.RunConnectionAsync(
+                        cancellationToken => this.RunConnectionAsync(gatewayConnection, cancellationToken),
                         readTaskCancellationToken);
                 }
                 catch (Exception ex) when (ex.CanCatch())
                 {
                     // Ignore, and try again. This includes the case when an
                     // OperationCanceledException was thrown above, which might be caused by
-                    // the Endpoint in order to cancel the current connection.
+                    // the Connection instance in order to cancel the current connection.
                     // We check later if it was caused by us canceling the CTS.
                     caughtException = ex;
                 }
@@ -297,7 +297,7 @@ public partial class Proxy : IInstance
 
     private async Task RunPingTaskAsync(
         SemaphoreSlim pingTimerSemaphore,
-        TcpClientFramingConnection endpoint)
+        TcpClientFramingConnection gatewayConnection)
     {
         while (true)
         {
@@ -305,12 +305,12 @@ public partial class Proxy : IInstance
             if (exit)
                 return;
 
-            endpoint.SendMessageByQueue(new byte[] { 0xFF });
+            gatewayConnection.SendMessageByQueue(new byte[] { 0xFF });
         }
     }
 
     private async Task RunConnectionAsync(
-        TcpClientFramingConnection endpoint,
+        TcpClientFramingConnection gatewayConnection,
         CancellationToken cancellationToken)
     {
         using var pingTimerSemaphore = new SemaphoreSlim(0);
@@ -318,11 +318,11 @@ public partial class Proxy : IInstance
 
         bool isProxyClient = this.proxyServerConnectionDescriptors is null;
 
-        // Beginning from this stage, the endpoint can be used, so we
+        // Beginning from this stage, the connection can be used, so we
         // can now set it.
         lock (this.syncRoot)
         {
-            this.tcpEndpoint = endpoint;
+            this.gatewayConnection = gatewayConnection;
         }
 
         try
@@ -342,14 +342,16 @@ public partial class Proxy : IInstance
             this.sessionPasswordBytes.Span.CopyTo(
                 loginString.AsSpan()[(2 + Constants.loginPrerequisiteBytes.Length + sizeof(int))..]);
 
-            endpoint.SendMessageByQueue(loginString);
+            gatewayConnection.SendMessageByQueue(loginString);
 
             // Start the ping timer task, then receive packets.
-            pingTimerTask = Task.Run(() => this.RunPingTaskAsync(pingTimerSemaphore, endpoint));
+            pingTimerTask = Task.Run(() => this.RunPingTaskAsync(pingTimerSemaphore, gatewayConnection));
 
             while (true)
             {
-                var packet = await endpoint.ReceiveMessageAsync(MaxReceiveMessageSize, cancellationToken);
+                var packet = await gatewayConnection.ReceiveMessageAsync(
+                    MaxReceiveMessageSize,
+                    cancellationToken);
 
                 if (packet is null)
                     return;
@@ -391,7 +393,9 @@ public partial class Proxy : IInstance
                     await this.HandlePartnerProxyUnavailableAsync(partnerProxyId ?? Constants.ProxyClientId);
 
                     if (partnerProxyAvailable)
-                        this.HandlePartnerProxyAvailable(endpoint, partnerProxyId ?? Constants.ProxyClientId);
+                        this.HandlePartnerProxyAvailable(
+                            gatewayConnection,
+                            partnerProxyId ?? Constants.ProxyClientId);
                 }
                 else if (TryDecodePartnerProxyMessage(
                     packetBuffer,
@@ -445,7 +449,7 @@ public partial class Proxy : IInstance
 
                             coreMessageToSend.Span[pos++] = ProxyMessageTypeAbortConnection;
 
-                            endpoint.SendMessageByQueue(messageToSend);
+                            gatewayConnection.SendMessageByQueue(messageToSend);
                         }
                         else
                         {
@@ -457,7 +461,7 @@ public partial class Proxy : IInstance
                                 var remoteClient = new TcpClient();
 
                                 this.StartTcpTunnelConnection(
-                                    endpoint,
+                                    gatewayConnection,
                                     partnerProxyId,
                                     activeConnections,
                                     connectionId,
@@ -570,17 +574,17 @@ public partial class Proxy : IInstance
             pingTimerSemaphore.Release();
             await (pingTimerTask ?? Task.CompletedTask);
 
-            // Once this method returns, the endpoint may no longer
+            // Once this method returns, the connection may no longer
             // be used to send data, so clear the instance.
             lock (this.syncRoot)
             {
-                this.tcpEndpoint = null;
+                this.gatewayConnection = null;
             }
         }
     }
 
     private void StartTcpTunnelConnection(
-        TcpClientFramingConnection endpoint,
+        TcpClientFramingConnection gatewayConnection,
         long partnerProxyId,
         Dictionary<long, ProxyTunnelConnection<TunnelConnectionData>> activeConnections,
         long connectionId,
@@ -609,7 +613,7 @@ public partial class Proxy : IInstance
                 receiveBuffer.CopyTo(coreMessage[pos..]);
                 pos += receiveBuffer.Length;
 
-                endpoint.SendMessageByQueue(message);
+                gatewayConnection.SendMessageByQueue(message);
             },
             transmitWindowUpdateHandler: window =>
             {
@@ -649,7 +653,7 @@ public partial class Proxy : IInstance
                 // message as that is a prerequisite before the proxy-client will receive a
                 // forwarded connection and can send data to the proxy-server, which would then
                 // cause a window update message to be sent.
-                endpoint.SendMessageByQueue(message, highPriority: true);
+                gatewayConnection.SendMessageByQueue(message, highPriority: true);
             },
             connectionFinishedHandler: isAbort =>
             {
@@ -671,14 +675,15 @@ public partial class Proxy : IInstance
 
                     coreMessage.Span[pos++] = ProxyMessageTypeAbortConnection;
 
-                    endpoint.SendMessageByQueue(message);
+                    gatewayConnection.SendMessageByQueue(message);
                 }
 
                 lock (this.syncRoot)
                 {
                     // The connection is finished, so remove it. After removing it, we mustn't
-                    // call the `Endpoint.SendMessageByQueue()` method again, because the endpoint
-                    // may already have stopped (and so calling that method would throw).
+                    // call the `Connection.SendMessageByQueue()` method again, because the
+                    // connection may already have stopped (and so calling that method would
+                    // throw).
                     // Note that the receiveTask is still running (we are being called from it,
                     // so we can't wait for it by calling `StopAsync()`), but at this stage the
                     // connection is considered to be finished and it doesn't have any more
@@ -695,7 +700,7 @@ public partial class Proxy : IInstance
         connection.Start();
     }
 
-    private void HandlePartnerProxyAvailable(TcpClientFramingConnection endpoint, long partnerProxyId)
+    private void HandlePartnerProxyAvailable(TcpClientFramingConnection gatewayConnection, long partnerProxyId)
     {
         lock (this.syncRoot)
         {
@@ -711,7 +716,7 @@ public partial class Proxy : IInstance
                 // create connection messages (through the listener) which the tunnel
                 // gateway would then ignore.
                 var response = new byte[] { 0x03 };
-                endpoint.SendMessageByQueue(response);
+                gatewayConnection.SendMessageByQueue(response);
             }
         }
     }
@@ -806,11 +811,11 @@ public partial class Proxy : IInstance
 
             // Send the message. From that point, our receiver task might already receive
             // events for the connection, which then need to wait for the lock.
-            this.tcpEndpoint!.SendMessageByQueue(message);
+            this.gatewayConnection!.SendMessageByQueue(message);
 
             // Add the connection to the list and start it.
             this.StartTcpTunnelConnection(
-                this.tcpEndpoint!,
+                this.gatewayConnection!,
                 Constants.ProxyClientId,
                 activeConnections,
                 connectionId,

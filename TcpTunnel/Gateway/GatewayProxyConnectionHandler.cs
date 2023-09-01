@@ -3,13 +3,12 @@ using System.Buffers.Binary;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Net;
 using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
 
 using TcpTunnel.Networking;
-
-using SystemNetEndpoint = System.Net.EndPoint;
 
 namespace TcpTunnel.Gateway;
 
@@ -40,8 +39,8 @@ namespace TcpTunnel.Gateway;
 internal class GatewayProxyConnectionHandler
 {
     private readonly Gateway gateway;
-    private readonly TcpClientFramingConnection endpoint;
-    private readonly SystemNetEndpoint clientEndpoint;
+    private readonly TcpClientFramingConnection proxyConnection;
+    private readonly EndPoint clientEndpoint;
 
     private long proxyId;
     private Session? authenticatedSession;
@@ -50,17 +49,12 @@ internal class GatewayProxyConnectionHandler
 
     public GatewayProxyConnectionHandler(
         Gateway gateway,
-        TcpClientFramingConnection endpoint,
-        SystemNetEndpoint clientEndpoint)
+        TcpClientFramingConnection proxyConnection,
+        EndPoint clientEndpoint)
     {
         this.gateway = gateway;
-        this.endpoint = endpoint;
+        this.proxyConnection = proxyConnection;
         this.clientEndpoint = clientEndpoint;
-    }
-
-    public TcpClientFramingConnection Endpoint
-    {
-        get => this.endpoint;
     }
 
     public async Task RunAsync(CancellationToken cancellationToken)
@@ -69,14 +63,14 @@ internal class GatewayProxyConnectionHandler
         {
             while (true)
             {
-                var packet = await this.endpoint.ReceiveMessageAsync(
+                var packet = await this.proxyConnection.ReceiveMessageAsync(
                     Gateway.MaxReceiveMessageSize,
                     cancellationToken);
 
                 if (packet is null)
                     return;
 
-                this.endpoint.HandlePing();
+                this.proxyConnection.HandlePing();
                 var packetBuffer = packet.Value.Buffer;
 
                 bool sessionWasAuthenticated = false;
@@ -119,7 +113,7 @@ internal class GatewayProxyConnectionHandler
                                     // may be reused by the caller).
                                     packetBuffer[(1 + sizeof(long))..].CopyTo(targetPacket.AsMemory()[1..]);
 
-                                    partnerProxy.endpoint.SendMessageByQueue(targetPacket);
+                                    partnerProxy.proxyConnection.SendMessageByQueue(targetPacket);
                                 }
                             }
                             else if (this.sessionIterationsToAcknowledge is 0 &&
@@ -133,7 +127,7 @@ internal class GatewayProxyConnectionHandler
                                 // See comment above.
                                 packetBuffer[1..].CopyTo(targetPacket.AsMemory()[(1 + sizeof(long))..]);
 
-                                partnerProxy.endpoint.SendMessageByQueue(targetPacket);
+                                partnerProxy.proxyConnection.SendMessageByQueue(targetPacket);
                             }
                         }
                     }
@@ -197,7 +191,7 @@ internal class GatewayProxyConnectionHandler
 
                                         // Notify the proxy that the authentication succeeded.
                                         var response = new byte[] { 0x01, 0x01 };
-                                        this.endpoint.SendMessageByQueue(response);
+                                        this.proxyConnection.SendMessageByQueue(response);
 
                                         // Check if an old proxy-client is present.
                                         // TODO: What should happen with that connection?
@@ -224,7 +218,7 @@ internal class GatewayProxyConnectionHandler
                             {
                                 // Notify the proxy that the authentication failed.
                                 var response = new byte[] { 0x01, 0x00 };
-                                this.endpoint.SendMessageByQueue(response);
+                                this.proxyConnection.SendMessageByQueue(response);
 
                                 // Also, close the connection.
                                 return;
@@ -332,6 +326,6 @@ internal class GatewayProxyConnectionHandler
 
         response[pos++] = isAvailable ? (byte)0x01 : (byte)0x00;
 
-        this.endpoint.SendMessageByQueue(response);
+        this.proxyConnection.SendMessageByQueue(response);
     }
 }

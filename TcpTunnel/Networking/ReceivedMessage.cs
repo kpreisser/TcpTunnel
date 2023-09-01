@@ -27,9 +27,12 @@ internal struct ReceivedMessage
     }
 
     /// <summary>
-    /// Returns the raw byte segment. Note (esp. for the TcpClientEndpoint) that
-    /// this buffer may be reused when reading the next packet.
+    /// Returns the raw byte memory.
     /// </summary>
+    /// <remarks>
+    /// Note (esp. for the <see cref="TcpClientConnection"/>) that this buffer may
+    /// be reused when reading the next packet.
+    /// </remarks>
     public Memory<byte> Buffer
     {
         get => this.buffer;

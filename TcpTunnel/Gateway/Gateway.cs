@@ -192,22 +192,22 @@ public class Gateway : IInstance
                 var remoteEndpoint = client.Client.RemoteEndPoint!;
                 this.logger?.Invoke($"Accepted connection from '{remoteEndpoint}'.");
 
-                var endpoint = new TcpClientFramingConnection(
+                var proxyConnection = new TcpClientFramingConnection(
                     client,
                     useSendQueue: true,
                     usePingTimer: true,
                     streamModifier: streamModifier);
 
-                var handler = new GatewayProxyConnectionHandler(this, endpoint, remoteEndpoint);
+                var handler = new GatewayProxyConnectionHandler(this, proxyConnection, remoteEndpoint);
 
                 lock (activeHandlers)
                 {
-                    // Start a task to handle the endpoint.
+                    // Start a task to handle the connection.
                     var runTask = ExceptionUtils.StartTask(async () =>
                     {
                         try
                         {
-                            await endpoint.RunConnectionAsync(handler.RunAsync, cancellationToken);
+                            await proxyConnection.RunConnectionAsync(handler.RunAsync, cancellationToken);
                         }
                         catch (Exception ex) when (ex.CanCatch())
                         {
