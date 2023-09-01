@@ -51,7 +51,7 @@ internal class TcpClientConnection : Connection
     /// <param name="maxLength"></param>
     /// <param name="cancellationToken"></param>
     /// <returns></returns>
-    public override async Task<ReceivedMessage?> ReceiveMessageAsync(
+    public override async ValueTask<ReceivedMessage?> ReceiveMessageAsync(
         int maxLength,
         CancellationToken cancellationToken)
     {
@@ -82,10 +82,8 @@ internal class TcpClientConnection : Connection
 
             if (count > 0)
             {
-                var memory = this.currentReadBufferFromPool.AsMemory()[..count];
-                var message = new ReceivedMessage(memory, ReceivedMessageType.Unknown);
-
-                return message;
+                var bufferMemory = this.currentReadBufferFromPool.AsMemory()[..count];
+                return new ReceivedMessage(bufferMemory, ReceivedMessageType.Unknown);
             }
             else
             {

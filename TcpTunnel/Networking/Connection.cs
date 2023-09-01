@@ -167,7 +167,7 @@ internal abstract partial class Connection
     /// <param name="cancellationToken"></param>
     /// <returns>The next packet, or <c>null</c> of the client closed the connection</returns>
     /// <exception cref="Exception">If an I/O error occurs</exception>
-    public abstract Task<ReceivedMessage?> ReceiveMessageAsync(
+    public abstract ValueTask<ReceivedMessage?> ReceiveMessageAsync(
         int maxLength,
         CancellationToken cancellationToken);
 

@@ -28,10 +28,13 @@ namespace TcpTunnel.Proxy;
  */
 public partial class Proxy : IInstance
 {
-    // The max message size is defined by the receive buffer size (32 KiB) plus
-    // the additional data, which are just a few bytes. Therefore, 512 KiB should
-    // be more than enough.
-    public const int MaxReceiveMessageSize = 512 * 1024;
+    // The max receive message size mainly arises from the tunnel connection receive buffer size
+    // (32 KiB) plus the additional metadata, which are just a few bytes. Therefore, 256 KiB
+    // should be more than enough.
+    // (But note that e.g. for the target host defined by the user that is sent to the
+    // proxy-client, there is currently no limit enforced, so such messages might theoretically
+    // exceed this size.)
+    public const int MaxReceiveMessageSize = 256 * 1024;
 
     private const int ProxyMessageTypeOpenConnection = 0x00;
     private const int ProxyMessageTypeData = 0x01;

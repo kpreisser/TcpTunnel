@@ -15,6 +15,10 @@ namespace TcpTunnel.Networking;
 /// </summary>
 internal class TcpClientFramingConnection : TcpClientConnection
 {
+    // Create our own length buffer instead of using the ArrayPool for this, as this is
+    // just a 4 byte buffer which will last as long as the connection instance.
+    private readonly byte[] lengthBuffer = new byte[sizeof(int)];
+
     private byte[]? currentReadBufferFromPool;
 
     public TcpClientFramingConnection(
@@ -34,7 +38,7 @@ internal class TcpClientFramingConnection : TcpClientConnection
     /// </summary>
     /// <param name="maxLength"></param>
     /// <returns></returns>
-    public override async Task<ReceivedMessage?> ReceiveMessageAsync(
+    public override async ValueTask<ReceivedMessage?> ReceiveMessageAsync(
         int maxLength,
         CancellationToken cancellationToken)
     {
@@ -46,52 +50,40 @@ internal class TcpClientFramingConnection : TcpClientConnection
 
         try
         {
-            // Wait until data is available.
-            await this.Stream!.ReadAsync(Memory<byte>.Empty, cancellationToken)
+            // Read the 32-bit payload length.
+            int readCount = await this.Stream!.ReadAtLeastAsync(
+                this.lengthBuffer,
+                this.lengthBuffer.Length,
+                throwOnEndOfStream: false,
+                cancellationToken)
                 .ConfigureAwait(false);
 
-            int payloadLength;
-            const int lengthSize = 4;
-            var lengthBuf = ArrayPool<byte>.Shared.Rent(lengthSize);
-            try
-            {
-                int readCount = await this.Stream.ReadAtLeastAsync(
-                    lengthBuf.AsMemory()[..lengthSize],
-                    lengthSize,
-                    throwOnEndOfStream: false,
-                    cancellationToken);
+            if (readCount is 0)
+                return null;
+            else if (readCount < this.lengthBuffer.Length)
+                throw new EndOfStreamException();
 
-                if (readCount is 0)
-                    return null;
-                else if (readCount < lengthSize)
-                    throw new EndOfStreamException();
-
-                payloadLength = BinaryPrimitives.ReadInt32BigEndian(lengthBuf);
-            }
-            finally
-            {
-                ArrayPool<byte>.Shared.Return(lengthBuf);
-            }
+            int payloadLength = BinaryPrimitives.ReadInt32BigEndian(this.lengthBuffer);
 
             if (payloadLength < 0 || payloadLength > maxLength)
                 throw new InvalidDataException("Invalid frame length: " + payloadLength);
 
-            // Wait until data is available.
-            await this.Stream.ReadAsync(Memory<byte>.Empty, cancellationToken)
-                .ConfigureAwait(false);
-
-            // Get a receive buffer from the pool.
+            // Rent a receive buffer from the pool.
+            // We don't additionally wait until data is available (using
+            // Memory<byte>.Empty) before renting a buffer, because in most cases there
+            // should already be more data available after the payload length.
+            // Additionally, it wouldn't buy us much e.g. as a DoS protection, since even
+            // when there is only one additional byte available, we would also already
+            // need to rent the buffer.
             this.currentReadBufferFromPool = ArrayPool<byte>.Shared.Rent(payloadLength);
 
+            var bufferMemory = this.currentReadBufferFromPool.AsMemory()[..payloadLength];
             await this.Stream.ReadExactlyAsync(
-                    this.currentReadBufferFromPool.AsMemory()[..payloadLength],
+                    bufferMemory,
                     cancellationToken)
                     .ConfigureAwait(false);
 
-            var memory = this.currentReadBufferFromPool.AsMemory()[..payloadLength];
-            var message = new ReceivedMessage(memory, ReceivedMessageType.ByteMessage);
-
-            return message;
+            return new ReceivedMessage(bufferMemory, ReceivedMessageType.ByteMessage);
         }
         catch (Exception ex) when (ex.CanCatch())
         {
