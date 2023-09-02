@@ -10,8 +10,6 @@ namespace TestProxyClient
     {
         static void Main()
         {
-            static void LogConsole(string s) => Console.WriteLine(s);
-
             // Restrict the target endpoints.
             var allowedTargetEndpoints = new List<(string host, int port)>
             {
@@ -27,7 +25,7 @@ namespace TestProxyClient
                 sessionPasswordBytes: Encoding.UTF8.GetBytes("testClientPasswort"),
                 proxyServerConnectionDescriptors: null,
                 proxyClientAllowedTargetEndpoints: allowedTargetEndpoints,
-                logger: LogConsole);
+                logger: Console.WriteLine);
 
             proxyClient.Start();
 

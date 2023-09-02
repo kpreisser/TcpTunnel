@@ -10,8 +10,6 @@ namespace TestProxyServer
     {
         static void Main()
         {
-            static void LogConsole(string s) => Console.WriteLine(s);
-
             var connectionDescriptors = new List<ProxyServerConnectionDescriptor>()
             {
                 new ProxyServerConnectionDescriptor(null, 80, "www.google.com", 80),
@@ -26,7 +24,7 @@ namespace TestProxyServer
                 sessionPasswordBytes: Encoding.UTF8.GetBytes("testServerPassword"),
                 proxyServerConnectionDescriptors: connectionDescriptors,
                 proxyClientAllowedTargetEndpoints: null,
-                logger: LogConsole);
+                logger: Console.WriteLine);
 
             proxyServer.Start();
 

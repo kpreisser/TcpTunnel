@@ -11,8 +11,6 @@ namespace TestGateway
     {
         static void Main()
         {
-            static void LogConsole(string s) => Console.WriteLine(s);
-
             int port = 23654;
 
             var server = new Gateway(
@@ -23,7 +21,7 @@ namespace TestGateway
                 new Dictionary<int, (string proxyClientPassword, string proxyServerPassword)>() {
                     { 15, ( "testClientPasswort", "testServerPassword") }
                 },
-                LogConsole);
+                Console.WriteLine);
 
             server.Start();
 

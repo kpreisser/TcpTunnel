@@ -51,12 +51,19 @@ namespace TcpTunnel.Runner
 
             try
             {
+                int nextInstanceId = 0;
+
                 foreach (var instanceElement in instanceElements)
                 {
+                    int instanceId = checked(nextInstanceId++);
+                    Action<string>? instanceLogger = this.logger is null ?
+                        null :
+                        s => this.logger($"[{instanceId.ToString(CultureInfo.InvariantCulture)}] {s}");
+
                     string applicationType = instanceElement.Attribute("type")?.Value ??
                         throw new InvalidDataException("Missing attribute 'type'.");
 
-                    bool isProxyListener = false;
+                    bool isProxyServer = false;
 
                     if (string.Equals(applicationType, "gateway", StringComparison.OrdinalIgnoreCase))
                     {
@@ -140,14 +147,14 @@ namespace TcpTunnel.Runner
                                     $"Duplicate session ID \"{sessionId.ToString(CultureInfo.InvariantCulture)}\".");
                         }
 
-                        var server = new Gateway.Gateway(listenerEntries, sessions, this.logger);
-                        server.Start();
+                        var gateway = new Gateway.Gateway(listenerEntries, sessions, instanceLogger);
+                        gateway.Start();
 
-                        this.instances.Add(server);
+                        this.instances.Add(gateway);
                     }
                     else if (string.Equals(applicationType, "proxy-client", StringComparison.OrdinalIgnoreCase) ||
                         string.Equals(applicationType, "proxy-server", StringComparison.OrdinalIgnoreCase) &&
-                            (isProxyListener = true))
+                            (isProxyServer = true))
                     {
                         string host = instanceElement.Attribute("host")?.Value ??
                                throw new InvalidDataException("Missing attribute 'host'.");
@@ -182,7 +189,7 @@ namespace TcpTunnel.Runner
                         var descriptors = default(List<ProxyServerConnectionDescriptor>);
                         var allowedTargetEndpoints = default(List<(string host, int port)>);
 
-                        if (isProxyListener)
+                        if (isProxyServer)
                         {
                             descriptors = new List<ProxyServerConnectionDescriptor>();
 
@@ -232,7 +239,7 @@ namespace TcpTunnel.Runner
                             }
                         }
 
-                        var client = new Proxy.Proxy(
+                        var proxy = new Proxy.Proxy(
                             host,
                             port,
                             useSsl,
@@ -240,15 +247,15 @@ namespace TcpTunnel.Runner
                             Encoding.UTF8.GetBytes(password),
                             descriptors,
                             allowedTargetEndpoints,
-                            this.logger);
+                            instanceLogger);
 
-                        client.Start();
+                        proxy.Start();
 
-                        this.instances.Add(client);
+                        this.instances.Add(proxy);
                     }
                     else
                     {
-                        throw new InvalidDataException("Unknown application type.");
+                        throw new InvalidDataException("Unknown instance type.");
                     }
                 }
             }
