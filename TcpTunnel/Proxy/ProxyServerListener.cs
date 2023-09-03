@@ -73,7 +73,7 @@ internal class ProxyServerListener
                 }
 
                 var listenerTask = ExceptionUtils.StartTask(
-                    () => this.RunListenerTask(listener, descriptor, this.listenersCts.Token));
+                    () => this.RunListenerTaskAsync(listener, descriptor, this.listenersCts.Token));
 
                 this.listeners.Add((listener, listenerTask));
             }
@@ -109,7 +109,7 @@ internal class ProxyServerListener
         this.listenersCts = null;
     }
 
-    private async Task RunListenerTask(
+    private async Task RunListenerTaskAsync(
         TcpListener listener,
         ProxyServerConnectionDescriptor connectionDescriptor,
         CancellationToken cancellationToken)

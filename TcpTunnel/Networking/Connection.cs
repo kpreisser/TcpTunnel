@@ -244,13 +244,23 @@ internal abstract partial class Connection
         }
         catch (Exception ex) when (ex.CanCatch())
         {
-            isNormalClose = false;
+            try
+            {
+                isNormalClose = false;
 
-            // Cancel pending I/O operations when an exception occured, so that we
-            // can then close the connection.
-            this.Cancel();
+                // Cancel pending I/O operations when an exception occured, so that we
+                // can then close the connection.
+                this.Cancel();
 
-            throw;
+                throw;
+            }
+            catch (Exception ex2) when (ex2.CanCatch() && false)
+            {
+                // We need a separate exception filter to prevent the finally handler
+                // from being called in case of an OOME being thrown in the above catch
+                // block.
+                throw;
+            }
         }
         finally
         {
@@ -507,10 +517,21 @@ internal abstract partial class Connection
         }
         catch (Exception ex) when (ex.CanCatch())
         {
-            // Ensure that a thread switch happens in case the current continuation is
-            // called inline from CancellationTokenSource.Cancel(), which could lead to
-            // deadlocks in certain situations (e.g. when holding some lock).
-            await Task.Yield();
+            // Ignore the exception.
+            try
+            {
+                // Ensure that a thread switch happens in case the current continuation is
+                // called inline from CancellationTokenSource.Cancel(), which could lead to
+                // deadlocks in certain situations (e.g. when holding some lock).
+                await Task.Yield();
+            }
+            catch (Exception ex2) when (ex2.CanCatch() && false)
+            {
+                // We need a separate exception filter to prevent the finally handler
+                // from being called in case of an OOME being thrown in the above catch
+                // block.
+                throw;
+            }
         }
         finally
         {

@@ -248,6 +248,12 @@ internal class ProxyTunnelConnection<T>
                 this.transmitDataQueueSemaphore.Dispose();
             }
         }
+        catch (Exception ex) when (ex.CanCatch() && false)
+        {
+            // We need a separate exception filter to prevent the finally handler
+            // from being called in case of an OOME.
+            throw;
+        }
         finally
         {
             // When we broke out due to an exception, ensure to reset the connection.
@@ -347,16 +353,26 @@ internal class ProxyTunnelConnection<T>
         }
         catch (Exception ex) when (ex.CanCatch())
         {
-            // Ensure that a thread switch happens in case the current continuation is
-            // called inline from CancellationTokenSource.Cancel(), in which case we
-            // might unexpectedly hold a lock on syncRoot.
-            await Task.Yield();
+            try
+            {
+                // Ensure that a thread switch happens in case the current continuation is
+                // called inline from CancellationTokenSource.Cancel(), in which case we
+                // might unexpectedly hold a lock on syncRoot.
+                await Task.Yield();
 
-            // Additionally, abort the connection here to ensure that when the receive
-            // task is already waiting for the transmit task to complete (when the
-            // remote already half-closed the connection), it can then report the abort
-            // to the partner proxy.
-            this.Abort();
+                // Additionally, abort the connection here to ensure that when the receive
+                // task is already waiting for the transmit task to complete (when the
+                // remote already half-closed the connection), it can then report the abort
+                // to the partner proxy.
+                this.Abort();
+            }
+            catch (Exception ex2) when (ex2.CanCatch() && false)
+            {
+                // We need a separate exception filter to prevent the finally handler
+                // from being called in case of an OOME being thrown in the above catch
+                // block.
+                throw;
+            }
         }
         finally
         {

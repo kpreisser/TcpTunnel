@@ -112,7 +112,7 @@ public class Gateway : IInstance
                     $"Gateway listener started on '{ip?.ToString() ?? "<any>"}:{port.ToString(CultureInfo.InvariantCulture)}'.");
 
                 var listenerTask = ExceptionUtils.StartTask(
-                    () => this.RunListenerTask(listener, certificate, this.listenersCts.Token));
+                    () => this.RunListenerTaskAsync(listener, certificate, this.listenersCts.Token));
 
                 this.activeListeners.Add((listener, listenerTask));
             }
@@ -148,14 +148,13 @@ public class Gateway : IInstance
         this.listenersCts = null;
     }
 
-    private async Task RunListenerTask(
+    private async Task RunListenerTaskAsync(
         TcpListener listener,
         X509Certificate2? certificate,
         CancellationToken cancellationToken)
     {
-        var streamModifier = ModifyStreamAsync;
-
         var activeHandlers = new Dictionary<GatewayProxyConnectionHandler, Task>();
+        var streamModifier = ModifyStreamAsync;
 
         try
         {
@@ -240,6 +239,12 @@ public class Gateway : IInstance
                 }
             }
         }
+        catch (Exception ex) when (ex.CanCatch() && false)
+        {
+            // We need a separate exception filter to prevent the finally handler
+            // from being called in case of an OOME.
+            throw;
+        }
         finally
         {
             // Wait for the connections to finish.
@@ -261,8 +266,8 @@ public class Gateway : IInstance
         }
 
         async ValueTask<Stream?> ModifyStreamAsync(
-            NetworkStream networkStream,
-            CancellationToken cancellationToken)
+                NetworkStream networkStream,
+                CancellationToken cancellationToken)
         {
             if (certificate is not null)
             {

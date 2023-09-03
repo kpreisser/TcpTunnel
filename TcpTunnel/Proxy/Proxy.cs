@@ -313,273 +313,287 @@ public partial class Proxy : IInstance
         TcpClientFramingConnection gatewayConnection,
         CancellationToken cancellationToken)
     {
-        using var pingTimerSemaphore = new SemaphoreSlim(0);
-        var pingTimerTask = default(Task);
-
-        bool isProxyClient = this.proxyServerConnectionDescriptors is null;
-
-        // Beginning from this stage, the connection can be used, so we
-        // can now set it.
-        lock (this.syncRoot)
-        {
-            this.gatewayConnection = gatewayConnection;
-        }
-
         try
         {
-            // Send the login string.
-            var loginString = new byte[2 + Constants.loginPrerequisiteBytes.Length +
-                sizeof(int) + this.sessionPasswordBytes.Length];
+            using var pingTimerSemaphore = new SemaphoreSlim(0);
+            var pingTimerTask = default(Task);
 
-            loginString[0] = 0x00;
-            loginString[1] = this.proxyServerConnectionDescriptors is not null ? (byte)0x01 : (byte)0x00;
+            bool isProxyClient = this.proxyServerConnectionDescriptors is null;
 
-            Constants.loginPrerequisiteBytes.CopyTo(loginString.AsMemory()[2..]);
-            BinaryPrimitives.WriteInt32BigEndian(
-                loginString.AsSpan()[(2 + Constants.loginPrerequisiteBytes.Length)..],
-                this.sessionId);
-
-            this.sessionPasswordBytes.Span.CopyTo(
-                loginString.AsSpan()[(2 + Constants.loginPrerequisiteBytes.Length + sizeof(int))..]);
-
-            gatewayConnection.SendMessageByQueue(loginString);
-
-            // Start the ping timer task, then receive packets.
-            pingTimerTask = Task.Run(() => this.RunPingTaskAsync(pingTimerSemaphore, gatewayConnection));
-
-            while (true)
+            // Beginning from this stage, the connection can be used, so we
+            // can now set it.
+            lock (this.syncRoot)
             {
-                var packet = await gatewayConnection.ReceiveMessageAsync(
-                    MaxReceiveMessageSize,
-                    cancellationToken);
+                this.gatewayConnection = gatewayConnection;
+            }
 
-                if (packet is null)
-                    return;
+            try
+            {
+                // Send the login string.
+                var loginString = new byte[2 + Constants.loginPrerequisiteBytes.Length +
+                    sizeof(int) + this.sessionPasswordBytes.Length];
 
-                var packetBuffer = packet.Value.Buffer;
+                loginString[0] = 0x00;
+                loginString[1] = this.proxyServerConnectionDescriptors is not null ? (byte)0x01 : (byte)0x00;
 
-                if (packetBuffer.Length >= 2 && packetBuffer.Span[0] is 0x01)
+                Constants.loginPrerequisiteBytes.CopyTo(loginString.AsMemory()[2..]);
+                BinaryPrimitives.WriteInt32BigEndian(
+                    loginString.AsSpan()[(2 + Constants.loginPrerequisiteBytes.Length)..],
+                    this.sessionId);
+
+                this.sessionPasswordBytes.Span.CopyTo(
+                    loginString.AsSpan()[(2 + Constants.loginPrerequisiteBytes.Length + sizeof(int))..]);
+
+                gatewayConnection.SendMessageByQueue(loginString);
+
+                // Start the ping timer task, then receive packets.
+                pingTimerTask = Task.Run(() => this.RunPingTaskAsync(pingTimerSemaphore, gatewayConnection));
+
+                while (true)
                 {
-                    bool authenticationSucceeded = packetBuffer.Span[1] is 0x01;
+                    var packet = await gatewayConnection.ReceiveMessageAsync(
+                        MaxReceiveMessageSize,
+                        cancellationToken);
 
-                    this.logger?.Invoke(
-                        $"Authentication: " +
-                        $"{(authenticationSucceeded ? "Succeeded" : "Failed")}.");
-                }
-                else if (packetBuffer.Length >= 2 + (isProxyClient ? sizeof(long) : 0) &&
-                    packetBuffer.Span[0] is 0x02)
-                {
-                    // New Session Status.
-                    packetBuffer = packetBuffer[1..];
+                    if (packet is null)
+                        return;
 
-                    long? partnerProxyId = null;
-                    if (isProxyClient)
+                    var packetBuffer = packet.Value.Buffer;
+
+                    if (packetBuffer.Length >= 2 && packetBuffer.Span[0] is 0x01)
                     {
-                        partnerProxyId = BinaryPrimitives.ReadInt64BigEndian(packetBuffer.Span);
-                        packetBuffer = packetBuffer[sizeof(long)..];
+                        bool authenticationSucceeded = packetBuffer.Span[1] is 0x01;
 
-                        if (partnerProxyId is Constants.ProxyClientId)
-                            throw new InvalidDataException();
+                        this.logger?.Invoke(
+                            $"Authentication: " +
+                            $"{(authenticationSucceeded ? "Succeeded" : "Failed")}.");
                     }
-
-                    bool partnerProxyAvailable = packetBuffer.Span[0] is 0x01;
-                    this.logger?.Invoke(
-                        $"Session Update: Partner Proxy Available{(partnerProxyId is not null ? $" [ID {partnerProxyId.Value.ToString(CultureInfo.InvariantCulture)}]" : "")}: " +
-                        $"{(partnerProxyAvailable ? "Yes" : "No")}.");
-
-                    // We always first need to treat this as the partner proxy
-                    // being unavailable, because the gateway will send this only
-                    // once in case the partner proxy is replaced.
-                    await this.HandlePartnerProxyUnavailableAsync(partnerProxyId ?? Constants.ProxyClientId);
-
-                    if (partnerProxyAvailable)
-                        this.HandlePartnerProxyAvailable(
-                            gatewayConnection,
-                            partnerProxyId ?? Constants.ProxyClientId);
-                }
-                else if (TryDecodePartnerProxyMessage(
-                    packetBuffer,
-                    isProxyClient,
-                    out var coreMessage,
-                    out long? partnerProxyIdNullable))
-                {
-                    // Proxy to proxy communication.
-                    if (partnerProxyIdNullable is { } value && value is Constants.ProxyClientId)
-                        throw new InvalidDataException();
-
-                    long partnerProxyId = partnerProxyIdNullable ?? Constants.ProxyClientId;
-
-                    // We don't need a lock to access the dictionary here since it is
-                    // only modified by us (the receiver task). We only need a lock to
-                    // change it, and when reading it from another task.
-                    if (!this.activePartnerProxiesAndConnections.TryGetValue(
-                        partnerProxyId,
-                        out var activeConnections))
-                        throw new InvalidDataException();
-
-                    long connectionId = BinaryPrimitives.ReadInt64BigEndian(coreMessage.Span);
-                    coreMessage = coreMessage[sizeof(long)..];
-
-                    if (coreMessage.Length >= 1 + sizeof(int) &&
-                        coreMessage.Span[0] is ProxyMessageTypeOpenConnection &&
-                        isProxyClient)
+                    else if (packetBuffer.Length >= 2 + (isProxyClient ? sizeof(long) : 0) &&
+                        packetBuffer.Span[0] is 0x02)
                     {
-                        // Open a new connection, if we are the proxy-client.
-                        int port = BinaryPrimitives.ReadInt32BigEndian(
-                            coreMessage.Span[1..]);
+                        // New Session Status.
+                        packetBuffer = packetBuffer[1..];
 
-                        string hostname = Encoding.UTF8.GetString(
-                            coreMessage.Span[(1 + sizeof(int))..]);
-
-                        // If the proxyClientAllowedTargetEndpoints list is specified, we need
-                        // to check whether the target endpoint is allowed. Otherwise, we abort
-                        // the connection.
-                        if (this.proxyClientAllowedTargetEndpoints is not null &&
-                            !this.proxyClientAllowedTargetEndpoints.Contains((hostname, port)))
+                        long? partnerProxyId = null;
+                        if (isProxyClient)
                         {
-                            // Notify the partner that the connection had to be aborted.
-                            int length = sizeof(long) + 1;
+                            partnerProxyId = BinaryPrimitives.ReadInt64BigEndian(packetBuffer.Span);
+                            packetBuffer = packetBuffer[sizeof(long)..];
 
-                            var (messageToSend, coreMessageToSend) = PreparePartnerProxyMessage(
-                                length,
-                                partnerProxyId);
+                            if (partnerProxyId is Constants.ProxyClientId)
+                                throw new InvalidDataException();
+                        }
 
-                            BinaryPrimitives.WriteInt64BigEndian(coreMessageToSend.Span, connectionId);
-                            int pos = sizeof(long);
+                        bool partnerProxyAvailable = packetBuffer.Span[0] is 0x01;
+                        this.logger?.Invoke(
+                            $"Session Update: Partner Proxy Available{(partnerProxyId is not null ? $" [ID {partnerProxyId.Value.ToString(CultureInfo.InvariantCulture)}]" : "")}: " +
+                            $"{(partnerProxyAvailable ? "Yes" : "No")}.");
 
-                            coreMessageToSend.Span[pos++] = ProxyMessageTypeAbortConnection;
+                        // We always first need to treat this as the partner proxy
+                        // being unavailable, because the gateway will send this only
+                        // once in case the partner proxy is replaced.
+                        await this.HandlePartnerProxyUnavailableAsync(partnerProxyId ?? Constants.ProxyClientId);
 
-                            gatewayConnection.SendMessageByQueue(messageToSend);
+                        if (partnerProxyAvailable)
+                            this.HandlePartnerProxyAvailable(
+                                gatewayConnection,
+                                partnerProxyId ?? Constants.ProxyClientId);
+                    }
+                    else if (TryDecodePartnerProxyMessage(
+                        packetBuffer,
+                        isProxyClient,
+                        out var coreMessage,
+                        out long? partnerProxyIdNullable))
+                    {
+                        // Proxy to proxy communication.
+                        if (partnerProxyIdNullable is { } value && value is Constants.ProxyClientId)
+                            throw new InvalidDataException();
+
+                        long partnerProxyId = partnerProxyIdNullable ?? Constants.ProxyClientId;
+
+                        // We don't need a lock to access the dictionary here since it is
+                        // only modified by us (the receiver task). We only need a lock to
+                        // change it, and when reading it from another task.
+                        if (!this.activePartnerProxiesAndConnections.TryGetValue(
+                            partnerProxyId,
+                            out var activeConnections))
+                            throw new InvalidDataException();
+
+                        long connectionId = BinaryPrimitives.ReadInt64BigEndian(coreMessage.Span);
+                        coreMessage = coreMessage[sizeof(long)..];
+
+                        if (coreMessage.Length >= 1 + sizeof(int) &&
+                            coreMessage.Span[0] is ProxyMessageTypeOpenConnection &&
+                            isProxyClient)
+                        {
+                            // Open a new connection, if we are the proxy-client.
+                            int port = BinaryPrimitives.ReadInt32BigEndian(
+                                coreMessage.Span[1..]);
+
+                            string hostname = Encoding.UTF8.GetString(
+                                coreMessage.Span[(1 + sizeof(int))..]);
+
+                            // If the proxyClientAllowedTargetEndpoints list is specified, we need
+                            // to check whether the target endpoint is allowed. Otherwise, we abort
+                            // the connection.
+                            if (this.proxyClientAllowedTargetEndpoints is not null &&
+                                !this.proxyClientAllowedTargetEndpoints.Contains((hostname, port)))
+                            {
+                                // Notify the partner that the connection had to be aborted.
+                                int length = sizeof(long) + 1;
+
+                                var (messageToSend, coreMessageToSend) = PreparePartnerProxyMessage(
+                                    length,
+                                    partnerProxyId);
+
+                                BinaryPrimitives.WriteInt64BigEndian(coreMessageToSend.Span, connectionId);
+                                int pos = sizeof(long);
+
+                                coreMessageToSend.Span[pos++] = ProxyMessageTypeAbortConnection;
+
+                                gatewayConnection.SendMessageByQueue(messageToSend);
+                            }
+                            else
+                            {
+                                lock (this.syncRoot)
+                                {
+                                    if (activeConnections.ContainsKey(connectionId))
+                                        throw new InvalidDataException();
+
+                                    var remoteClient = new TcpClient();
+
+                                    this.StartTcpTunnelConnection(
+                                        gatewayConnection,
+                                        partnerProxyId,
+                                        activeConnections,
+                                        connectionId,
+                                        remoteClient,
+                                        async cancellationToken =>
+                                        {
+                                            await remoteClient.ConnectAsync(hostname, port, cancellationToken);
+
+                                            // After the socket is connected, configure it to disable the Nagle
+                                            // algorithm, disable delayed ACKs, and enable TCP keep-alive.
+                                            SocketConfigurator.ConfigureSocket(
+                                                remoteClient.Client,
+                                                enableKeepAlive: true);
+
+                                            // Additionally, use a smaller socket send buffer size to reduce
+                                            // buffer bloat.
+                                            remoteClient.Client.SendBufferSize = Constants.SocketSendBufferSize;
+                                        });
+                                }
+                            }
                         }
                         else
                         {
+                            ProxyTunnelConnection<TunnelConnectionData>? connection;
                             lock (this.syncRoot)
                             {
-                                if (activeConnections.ContainsKey(connectionId))
-                                    throw new InvalidDataException();
+                                // We might fail to find the connectionId if the connection
+                                // was already fully closed.
+                                activeConnections.TryGetValue(connectionId, out connection);
+                            }
 
-                                var remoteClient = new TcpClient();
+                            if (connection is not null)
+                            {
+                                bool abortTunnelConnectionDueToError = false;
 
-                                this.StartTcpTunnelConnection(
-                                    gatewayConnection,
-                                    partnerProxyId,
-                                    activeConnections,
-                                    connectionId,
-                                    remoteClient,
-                                    async cancellationToken =>
+                                if (coreMessage.Length >= 1 &&
+                                    coreMessage.Span[0] is ProxyMessageTypeData)
+                                {
+                                    // Transmit the data packet (or shutdown the connection if
+                                    // the length is 0).
+                                    // Need to copy the array because the caller might reuse
+                                    // the packet array.
+                                    var newPacket = new byte[coreMessage.Length - 1];
+                                    coreMessage[1..].CopyTo(newPacket);
+
+                                    try
                                     {
-                                        await remoteClient.ConnectAsync(hostname, port, cancellationToken);
-
-                                        // After the socket is connected, configure it to disable the Nagle
-                                        // algorithm, disable delayed ACKs, and enable TCP keep-alive.
-                                        SocketConfigurator.ConfigureSocket(
-                                            remoteClient.Client,
-                                            enableKeepAlive: true);
-
-                                        // Additionally, use a smaller socket send buffer size to reduce
-                                        // buffer bloat.
-                                        remoteClient.Client.SendBufferSize = Constants.SocketSendBufferSize;
-                                    });
-                            }
-                        }
-                    }
-                    else
-                    {
-                        ProxyTunnelConnection<TunnelConnectionData>? connection;
-                        lock (this.syncRoot)
-                        {
-                            // We might fail to find the connectionId if the connection
-                            // was already fully closed.
-                            activeConnections.TryGetValue(connectionId, out connection);
-                        }
-
-                        if (connection is not null)
-                        {
-                            bool abortTunnelConnectionDueToError = false;
-
-                            if (coreMessage.Length >= 1 &&
-                                coreMessage.Span[0] is ProxyMessageTypeData)
-                            {
-                                // Transmit the data packet (or shutdown the connection if
-                                // the length is 0).
-                                // Need to copy the array because the caller might reuse
-                                // the packet array.
-                                var newPacket = new byte[coreMessage.Length - 1];
-                                coreMessage[1..].CopyTo(newPacket);
-
-                                try
-                                {
-                                    connection.EnqueueTransmitData(newPacket);
+                                        connection.EnqueueTransmitData(newPacket);
+                                    }
+                                    catch (ArgumentException)
+                                    {
+                                        // An argument exception means the passed data length or
+                                        // window size would exceed the allowed size, which means
+                                        // the partner proxy doesn't work correctly or might be
+                                        // malicious. In that case, we abort the tunnel connection
+                                        // (not the whole connection to the gateway, because when
+                                        // we are the proxy-client that can possibly handle
+                                        // multiple connections, this would also affect connections
+                                        // from other proxy-servers).
+                                        abortTunnelConnectionDueToError = true;
+                                    }
                                 }
-                                catch (ArgumentException)
+                                else if (coreMessage.Length >= 1 + sizeof(int) &&
+                                    coreMessage.Span[0] is ProxyMessageTypeUpdateWindow)
                                 {
-                                    // An argument exception means the passed data length or
-                                    // window size would exceed the allowed size, which means
-                                    // the partner proxy doesn't work correctly or might be
-                                    // malicious. In that case, we abort the tunnel connection
-                                    // (not the whole connection to the gateway, because when
-                                    // we are the proxy-client that can possibly handle
-                                    // multiple connections, this would also affect connections
-                                    // from other proxy-servers).
-                                    abortTunnelConnectionDueToError = true;
-                                }
-                            }
-                            else if (coreMessage.Length >= 1 + sizeof(int) &&
-                                coreMessage.Span[0] is ProxyMessageTypeUpdateWindow)
-                            {
-                                // Update the receive window size.
-                                int windowSize = BinaryPrimitives.ReadInt32BigEndian(
-                                    coreMessage.Span[1..]);
+                                    // Update the receive window size.
+                                    int windowSize = BinaryPrimitives.ReadInt32BigEndian(
+                                        coreMessage.Span[1..]);
 
-                                try
-                                {
-                                    connection.UpdateReceiveWindow(windowSize);
-                                }
-                                catch (ArgumentException)
-                                {
-                                    // See comments above.
-                                    abortTunnelConnectionDueToError = true;
-                                }
-                            }
-
-                            if (abortTunnelConnectionDueToError ||
-                                coreMessage.Length >= 1 &&
-                                coreMessage.Span[0] is ProxyMessageTypeAbortConnection)
-                            {
-                                // Abort the connection, which will reset it immediately. We
-                                // use StopAsync() to ensure the connection is removed from
-                                // the list of active connections before we continue.
-                                if (!abortTunnelConnectionDueToError)
-                                {
-                                    // Because the abort has been initiated by the partner
-                                    // proxy, we try to suppress sending the abort message
-                                    // (as the partner already knows about the abort).
-                                    connection.Data.SuppressSendAbortMessage = true;
-                                    Thread.MemoryBarrier();
+                                    try
+                                    {
+                                        connection.UpdateReceiveWindow(windowSize);
+                                    }
+                                    catch (ArgumentException)
+                                    {
+                                        // See comments above.
+                                        abortTunnelConnectionDueToError = true;
+                                    }
                                 }
 
-                                await connection.StopAsync();
+                                if (abortTunnelConnectionDueToError ||
+                                    coreMessage.Length >= 1 &&
+                                    coreMessage.Span[0] is ProxyMessageTypeAbortConnection)
+                                {
+                                    // Abort the connection, which will reset it immediately. We
+                                    // use StopAsync() to ensure the connection is removed from
+                                    // the list of active connections before we continue.
+                                    if (!abortTunnelConnectionDueToError)
+                                    {
+                                        // Because the abort has been initiated by the partner
+                                        // proxy, we try to suppress sending the abort message
+                                        // (as the partner already knows about the abort).
+                                        connection.Data.SuppressSendAbortMessage = true;
+                                        Thread.MemoryBarrier();
+                                    }
+
+                                    await connection.StopAsync();
+                                }
                             }
                         }
                     }
                 }
             }
-        }
-        finally
-        {
-            // Need to copy the keys list since it will be modified by the callee.
-            foreach (long partnerProxyId in this.activePartnerProxiesAndConnections.Keys.ToArray())
-                await this.HandlePartnerProxyUnavailableAsync(partnerProxyId);
-
-            pingTimerSemaphore.Release();
-            await (pingTimerTask ?? Task.CompletedTask);
-
-            // Once this method returns, the connection may no longer
-            // be used to send data, so clear the instance.
-            lock (this.syncRoot)
+            finally
             {
-                this.gatewayConnection = null;
+                // Need to copy the keys list since it will be modified by the callee.
+                foreach (long partnerProxyId in this.activePartnerProxiesAndConnections.Keys.ToArray())
+                    await this.HandlePartnerProxyUnavailableAsync(partnerProxyId);
+
+                pingTimerSemaphore.Release();
+                await (pingTimerTask ?? Task.CompletedTask);
+
+                // Once this method returns, the connection may no longer
+                // be used to send data, so clear the instance.
+                lock (this.syncRoot)
+                {
+                    this.gatewayConnection = null;
+                }
             }
+        }
+        catch (Exception ex) when (ex.CanCatch() && false)
+        {
+            // We need a separate exception filter to prevent the finally handlers
+            // from being called in case of an OOME.
+            // This is a separate try-catch block to include the case when e.g. the above
+            // `finally` block throws an OOME (and then we wouldn't wait for the ping
+            // task to finish), in which case we would then dispose the ping task semaphore
+            // before the exception filter of the outer async method would terminate
+            // the app.
+            throw;
         }
     }
 

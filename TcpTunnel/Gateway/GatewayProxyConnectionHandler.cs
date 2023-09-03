@@ -9,6 +9,7 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using TcpTunnel.Networking;
+using TcpTunnel.Utils;
 
 namespace TcpTunnel.Gateway;
 
@@ -61,176 +62,185 @@ internal class GatewayProxyConnectionHandler
     {
         try
         {
-            while (true)
+            try
             {
-                var packet = await this.proxyConnection.ReceiveMessageAsync(
-                    Gateway.MaxReceiveMessageSize,
-                    cancellationToken);
-
-                if (packet is null)
-                    return;
-
-                this.proxyConnection.HandlePing();
-                var packetBuffer = packet.Value.Buffer;
-
-                bool sessionWasAuthenticated = false;
-                lock (this.gateway.SyncRoot)
+                while (true)
                 {
-                    // Need to access the field within the lock, as it might be changed by
-                    // a different connection handler.
-                    if (this.authenticatedSession is { } session)
+                    var packet = await this.proxyConnection.ReceiveMessageAsync(
+                        Gateway.MaxReceiveMessageSize,
+                        cancellationToken);
+
+                    if (packet is null)
+                        return;
+
+                    this.proxyConnection.HandlePing();
+                    var packetBuffer = packet.Value.Buffer;
+
+                    bool sessionWasAuthenticated = false;
+                    lock (this.gateway.SyncRoot)
                     {
-                        sessionWasAuthenticated = true;
-                        bool isProxyClient = this.proxyId is Constants.ProxyClientId;
-
-                        if (packetBuffer.Length >= 1 && packetBuffer.Span[0] is 0x03 && !isProxyClient)
+                        // Need to access the field within the lock, as it might be changed by
+                        // a different connection handler.
+                        if (this.authenticatedSession is { } session)
                         {
-                            // Acknowledge the current session iteration.
-                            if (this.sessionIterationsToAcknowledge <= 0)
-                                throw new InvalidOperationException(); // Invalid message
+                            sessionWasAuthenticated = true;
+                            bool isProxyClient = this.proxyId is Constants.ProxyClientId;
 
-                            this.sessionIterationsToAcknowledge--;
-                        }
-                        else if (packetBuffer.Length >= 1 + (isProxyClient ? sizeof(long) : 0) &&
-                            packetBuffer.Span[0] is Constants.TypeProxyToProxyCommunication)
-                        {
-                            // Proxy-to-proxy communication.
-                            // Forward the packet to the partner proxy, if available and if
-                            // the current proxy has acknowledged the current session iteration.
-                            if (isProxyClient)
+                            if (packetBuffer.Length >= 1 && packetBuffer.Span[0] is 0x03 && !isProxyClient)
                             {
-                                long partnerProxyId = BinaryPrimitives.ReadInt64BigEndian(packetBuffer.Span[1..]);
-                                if (partnerProxyId is Constants.ProxyClientId)
-                                    throw new InvalidDataException();
+                                // Acknowledge the current session iteration.
+                                if (this.sessionIterationsToAcknowledge <= 0)
+                                    throw new InvalidOperationException(); // Invalid message
 
-                                if (session.Proxies.TryGetValue(partnerProxyId, out var partnerProxy))
+                                this.sessionIterationsToAcknowledge--;
+                            }
+                            else if (packetBuffer.Length >= 1 + (isProxyClient ? sizeof(long) : 0) &&
+                                packetBuffer.Span[0] is Constants.TypeProxyToProxyCommunication)
+                            {
+                                // Proxy-to-proxy communication.
+                                // Forward the packet to the partner proxy, if available and if
+                                // the current proxy has acknowledged the current session iteration.
+                                if (isProxyClient)
                                 {
-                                    // Strip out the proxy ID.
-                                    var targetPacket = new byte[packetBuffer.Length - sizeof(long)];
-                                    targetPacket[0] = Constants.TypeProxyToProxyCommunication;
+                                    long partnerProxyId = BinaryPrimitives.ReadInt64BigEndian(packetBuffer.Span[1..]);
+                                    if (partnerProxyId is Constants.ProxyClientId)
+                                        throw new InvalidDataException();
 
-                                    // Need to copy the data because it will be queued (and the buffer
-                                    // may be reused by the caller).
-                                    packetBuffer[(1 + sizeof(long))..].CopyTo(targetPacket.AsMemory()[1..]);
+                                    if (session.Proxies.TryGetValue(partnerProxyId, out var partnerProxy))
+                                    {
+                                        // Strip out the proxy ID.
+                                        var targetPacket = new byte[packetBuffer.Length - sizeof(long)];
+                                        targetPacket[0] = Constants.TypeProxyToProxyCommunication;
+
+                                        // Need to copy the data because it will be queued (and the buffer
+                                        // may be reused by the caller).
+                                        packetBuffer[(1 + sizeof(long))..].CopyTo(targetPacket.AsMemory()[1..]);
+
+                                        partnerProxy.proxyConnection.SendMessageByQueue(targetPacket);
+                                    }
+                                }
+                                else if (this.sessionIterationsToAcknowledge is 0 &&
+                                    session.Proxies.TryGetValue(Constants.ProxyClientId, out var partnerProxy))
+                                {
+                                    // Add the sender proxy ID.
+                                    var targetPacket = new byte[packetBuffer.Length + sizeof(long)];
+                                    targetPacket[0] = Constants.TypeProxyToProxyCommunication;
+                                    BinaryPrimitives.WriteInt64BigEndian(targetPacket.AsSpan()[1..], this.proxyId);
+
+                                    // See comment above.
+                                    packetBuffer[1..].CopyTo(targetPacket.AsMemory()[(1 + sizeof(long))..]);
 
                                     partnerProxy.proxyConnection.SendMessageByQueue(targetPacket);
                                 }
                             }
-                            else if (this.sessionIterationsToAcknowledge is 0 &&
-                                session.Proxies.TryGetValue(Constants.ProxyClientId, out var partnerProxy))
-                            {
-                                // Add the sender proxy ID.
-                                var targetPacket = new byte[packetBuffer.Length + sizeof(long)];
-                                targetPacket[0] = Constants.TypeProxyToProxyCommunication;
-                                BinaryPrimitives.WriteInt64BigEndian(targetPacket.AsSpan()[1..], this.proxyId);
-
-                                // See comment above.
-                                packetBuffer[1..].CopyTo(targetPacket.AsMemory()[(1 + sizeof(long))..]);
-
-                                partnerProxy.proxyConnection.SendMessageByQueue(targetPacket);
-                            }
                         }
                     }
-                }
 
-                if (!sessionWasAuthenticated)
-                {
-                    // Only allow authentication packets. Because we might need to do a
-                    // (possibly expensive) authentication, we run this code outside of the
-                    // lock, until we could actually authenticate the proxy.
-                    if (packetBuffer.Length >= 2 + Constants.loginPrerequisiteBytes.Length + sizeof(int) &&
-                        packetBuffer.Span[0] is 0x00)
+                    if (!sessionWasAuthenticated)
                     {
-                        // Authentication.
-                        // The proxy-client will always have ID 0.
-                        bool isProxyClient = packetBuffer.Span[1] is 0x00;
-                        var clientPrerequisite = packetBuffer[2..][..Constants.loginPrerequisiteBytes.Length];
-
-                        bool couldAuthenticate = false;
-                        if (clientPrerequisite.Span.SequenceEqual(Constants.loginPrerequisiteBytes.Span))
+                        // Only allow authentication packets. Because we might need to do a
+                        // (possibly expensive) authentication, we run this code outside of the
+                        // lock, until we could actually authenticate the proxy.
+                        if (packetBuffer.Length >= 2 + Constants.loginPrerequisiteBytes.Length + sizeof(int) &&
+                            packetBuffer.Span[0] is 0x00)
                         {
-                            int sessionId = BinaryPrimitives.ReadInt32BigEndian(
-                                packetBuffer.Span[(2 + Constants.loginPrerequisiteBytes.Length)..]);
-                            var enteredPasswordBytes = packetBuffer
-                                [(2 + Constants.loginPrerequisiteBytes.Length + sizeof(int))..];
+                            // Authentication.
+                            // The proxy-client will always have ID 0.
+                            bool isProxyClient = packetBuffer.Span[1] is 0x00;
+                            var clientPrerequisite = packetBuffer[2..][..Constants.loginPrerequisiteBytes.Length];
 
-                            // Check if the session exists.
-                            if (this.gateway.Sessions.TryGetValue(sessionId, out var session))
+                            bool couldAuthenticate = false;
+                            if (clientPrerequisite.Span.SequenceEqual(Constants.loginPrerequisiteBytes.Span))
                             {
-                                // Verify the session password. For this, we need to
-                                // use FixedTimeEquals to prevent timing attacks.
-                                var correctPasswordBytes = isProxyClient ?
-                                    session.ProxyClientPasswordBytes :
-                                    session.ProxyServerPasswordBytes;
+                                int sessionId = BinaryPrimitives.ReadInt32BigEndian(
+                                    packetBuffer.Span[(2 + Constants.loginPrerequisiteBytes.Length)..]);
+                                var enteredPasswordBytes = packetBuffer
+                                    [(2 + Constants.loginPrerequisiteBytes.Length + sizeof(int))..];
 
-                                if (CryptographicOperations.FixedTimeEquals(
-                                    enteredPasswordBytes.Span,
-                                    correctPasswordBytes.Span))
+                                // Check if the session exists.
+                                if (this.gateway.Sessions.TryGetValue(sessionId, out var session))
                                 {
-                                    // Proxy authenticated successfully for the given
-                                    // session ID.
-                                    couldAuthenticate = true;
+                                    // Verify the session password. For this, we need to
+                                    // use FixedTimeEquals to prevent timing attacks.
+                                    var correctPasswordBytes = isProxyClient ?
+                                        session.ProxyClientPasswordBytes :
+                                        session.ProxyServerPasswordBytes;
 
-                                    this.gateway.Logger?.Invoke(
-                                        $"Proxy '{this.clientEndpoint}' authenticated for Session ID '{sessionId}' " +
-                                        $"({(isProxyClient ? "proxy-client" : "proxy-server")}).");
-
-                                    // Enter the lock again. We don't need to check whether
-                                    // authenticatedSession is still null, as it can only be
-                                    // set to null by another connection handler, but not to
-                                    // an non-null value.
-                                    lock (this.gateway.SyncRoot)
+                                    if (CryptographicOperations.FixedTimeEquals(
+                                        enteredPasswordBytes.Span,
+                                        correctPasswordBytes.Span))
                                     {
-                                        this.authenticatedSession = session;
-                                        this.proxyId = isProxyClient ?
-                                            Constants.ProxyClientId :
-                                            checked(session.NextProxyId++);
+                                        // Proxy authenticated successfully for the given
+                                        // session ID.
+                                        couldAuthenticate = true;
 
-                                        Debug.Assert(
-                                            isProxyClient || this.proxyId is not Constants.ProxyClientId);
+                                        this.gateway.Logger?.Invoke(
+                                            $"Proxy '{this.clientEndpoint}' authenticated for Session ID '{sessionId}' " +
+                                            $"({(isProxyClient ? "proxy-client" : "proxy-server")}).");
 
-                                        // Notify the proxy that the authentication succeeded.
-                                        var response = new byte[] { 0x01, 0x01 };
-                                        this.proxyConnection.SendMessageByQueue(response);
-
-                                        // Check if an old proxy-client is present.
-                                        // TODO: What should happen with that connection?
-                                        // Currently we just de-authenticate it without
-                                        // informing the corresponding proxy.
-                                        if (isProxyClient && session.Proxies.TryGetValue(
-                                            Constants.ProxyClientId,
-                                            out var proxyClient))
+                                        // Enter the lock again. We don't need to check whether
+                                        // authenticatedSession is still null, as it can only be
+                                        // set to null by another connection handler, but not to
+                                        // an non-null value.
+                                        lock (this.gateway.SyncRoot)
                                         {
-                                            proxyClient.authenticatedSession = null;
+                                            this.authenticatedSession = session;
+                                            this.proxyId = isProxyClient ?
+                                                Constants.ProxyClientId :
+                                                checked(session.NextProxyId++);
+
+                                            Debug.Assert(
+                                                isProxyClient || this.proxyId is not Constants.ProxyClientId);
+
+                                            // Notify the proxy that the authentication succeeded.
+                                            var response = new byte[] { 0x01, 0x01 };
+                                            this.proxyConnection.SendMessageByQueue(response);
+
+                                            // Check if an old proxy-client is present.
+                                            // TODO: What should happen with that connection?
+                                            // Currently we just de-authenticate it without
+                                            // informing the corresponding proxy.
+                                            if (isProxyClient && session.Proxies.TryGetValue(
+                                                Constants.ProxyClientId,
+                                                out var proxyClient))
+                                            {
+                                                proxyClient.authenticatedSession = null;
+                                            }
+
+                                            // Set the new proxy.
+                                            session.Proxies[this.proxyId] = this;
+
+                                            // Inform the partnered proxies about the new
+                                            // availability.
+                                            this.SendSessionStatuses(true);
                                         }
-
-                                        // Set the new proxy.
-                                        session.Proxies[this.proxyId] = this;
-
-                                        // Inform the partnered proxies about the new
-                                        // availability.
-                                        this.SendSessionStatuses(true);
                                     }
                                 }
-                            }
 
-                            if (!couldAuthenticate)
-                            {
-                                // Notify the proxy that the authentication failed.
-                                var response = new byte[] { 0x01, 0x00 };
-                                this.proxyConnection.SendMessageByQueue(response);
+                                if (!couldAuthenticate)
+                                {
+                                    // Notify the proxy that the authentication failed.
+                                    var response = new byte[] { 0x01, 0x00 };
+                                    this.proxyConnection.SendMessageByQueue(response);
 
-                                // Also, close the connection.
-                                return;
+                                    // Also, close the connection.
+                                    return;
+                                }
                             }
                         }
                     }
                 }
             }
+            finally
+            {
+                this.HandleClose();
+            }
         }
-        finally
+        catch (Exception ex) when (ex.CanCatch() && false)
         {
-            this.HandleClose();
+            // We need a separate exception filter to prevent the finally handler
+            // from being called in case of an OOME.
+            throw;
         }
     }
 
