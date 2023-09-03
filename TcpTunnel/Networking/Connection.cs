@@ -258,7 +258,10 @@ internal abstract partial class Connection
             {
                 // We need a separate exception filter to prevent the finally handler
                 // from being called in case of an OOME being thrown in the above catch
-                // block.
+                // block. For example, if CancellationTokenSource.Cancel() throws an OOME,
+                // we might otherwise start to execute the finally handler which would
+                // wait for the tasks to exit, but since the CTS wouldn't have been
+                // cancelled, we might wait infinitely.
                 throw;
             }
         }
