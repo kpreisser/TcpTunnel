@@ -5,7 +5,6 @@ using System.IO;
 using System.Net;
 using System.Net.Security;
 using System.Net.Sockets;
-using System.Runtime.InteropServices;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Threading;
@@ -20,10 +19,13 @@ namespace TcpTunnel.Gateway;
 
 public class Gateway : IInstance
 {
-    // The max message size is defined by the receive buffer size (32 KiB) plus
-    // the additional data, which are just a few bytes. Therefore, 512 KiB should
-    // be more than enough.
-    public const int MaxReceiveMessageSize = 512 * 1024;
+    // The max receive message size mainly arises from the tunnel connection receive buffer size
+    // (32 KiB) plus the additional metadata, which are just a few bytes. Therefore, 256 KiB
+    // should be more than enough.
+    // (But note that e.g. for the target host defined by the user that is sent to the
+    // proxy-client, there is currently no limit enforced, so such messages might theoretically
+    // exceed this size.)
+    public const int MaxReceiveMessageSize = 256 * 1024;
 
     private readonly IReadOnlyList<(IPAddress? ip, int port, X509Certificate2? certificate)> listenEntries;
 
