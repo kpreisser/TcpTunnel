@@ -49,12 +49,14 @@ will then be run by a single application process.
 
 - Uses async I/O for high scalability.
 - Supports SSL (TLS) and password authentication for secure connections between the Gateway and the Proxies.
-- Multiplexes multiple (tunneled) TCP connections over a single connection, similar to the stream concept in HTTP/2.
+- Multiplexes multiple (tunneled) TCP connections over a single connection, similar to the stream concept
+  in HTTP/2.
 - Uses flow control for the tunneled TCP connections (using a initial window size of 384 KiB), similar
   to the flow control mechanism in HTTP/2.
 - Multiple Proxy-Server instances can connect to a session, so it's possible to connect to the target
   endpoints from different machines at the same time.
-- Automatically recovers after one of the nodes (*Gateway*, *Proxy-Server*, *Proxy-Client*) was temporarily unavailable.
+- Automatically recovers after one of the instances (*Gateway*, *Proxy-Server*, *Proxy-Client*) was
+  temporarily unavailable.
 - On Windows, it can be installed as service.
 
 ## Security Considerations
