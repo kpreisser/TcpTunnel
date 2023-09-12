@@ -295,21 +295,6 @@ internal abstract partial class Connection
                     this.sendQueueWorkerTask = null;
             }
 
-            // Stop the ping timer.
-            if (this.usePingTimer)
-            {
-                this.pingTimerQuit = true;
-                Thread.MemoryBarrier();
-
-                this.pingTimerSemaphore!.Release();
-
-                // Asynchronously wait for the task to finish. See comment above.
-                await this.pingTimerTask!.ConfigureAwait(false);
-                this.pingTimerTask = null;
-                this.pingTimerSemaphore.Dispose();
-                this.pingTimerSemaphore = null;
-            }
-
             // Close the connection.
             try
             {
@@ -322,6 +307,22 @@ internal abstract partial class Connection
             catch (Exception ex) when (ex.CanCatch())
             {
                 // Ignore.
+            }
+
+            // Stop the ping timer. This must be done after shutting down the connection,
+            // to ensure we will apply the ping timeout e.g. if the shutdown blocks.
+            if (this.usePingTimer)
+            {
+                this.pingTimerQuit = true;
+                Thread.MemoryBarrier();
+
+                this.pingTimerSemaphore!.Release();
+
+                // Asynchronously wait for the task to finish. See comment above.
+                await this.pingTimerTask!.ConfigureAwait(false);
+                this.pingTimerTask = null;
+                this.pingTimerSemaphore.Dispose();
+                this.pingTimerSemaphore = null;
             }
 
             await this.HandleCloseAsync().ConfigureAwait(false);
