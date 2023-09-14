@@ -13,7 +13,7 @@ namespace TcpTunnel.Networking;
 /// <summary>
 /// An TCP connection that frames messages using a 4 byte length prefix.
 /// </summary>
-internal class TcpClientFramingConnection : TcpClientConnection
+internal class TcpFramingConnection : TcpConnection
 {
     // Create our own length buffer instead of using the ArrayPool for this, as this is
     // just a 4 byte buffer which will last as long as the connection instance.
@@ -21,14 +21,14 @@ internal class TcpClientFramingConnection : TcpClientConnection
 
     private byte[]? currentReadBufferFromPool;
 
-    public TcpClientFramingConnection(
-        TcpClient client,
+    public TcpFramingConnection(
+        Socket socket,
         bool useSendQueue,
         bool usePingTimer,
         Func<CancellationToken, ValueTask>? connectHandler = null,
         Action? closeHandler = null,
         Func<NetworkStream, CancellationToken, ValueTask<Stream?>>? streamModifier = null)
-        : base(client, useSendQueue, usePingTimer, connectHandler, closeHandler, streamModifier)
+        : base(socket, useSendQueue, usePingTimer, connectHandler, closeHandler, streamModifier)
     {
     }
 

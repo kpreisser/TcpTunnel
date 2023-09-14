@@ -30,7 +30,7 @@ internal struct ReceivedMessage
     /// Returns the raw byte memory.
     /// </summary>
     /// <remarks>
-    /// Note (esp. for the <see cref="TcpClientConnection"/>) that this buffer may
+    /// Note (esp. for the <see cref="TcpConnection"/>) that this buffer may
     /// be reused when reading the next packet.
     /// </remarks>
     public Memory<byte> Buffer

@@ -9,7 +9,7 @@ using TcpTunnel.Utils;
 
 namespace TcpTunnel.Networking;
 
-internal class TcpClientConnection : Connection
+internal class TcpConnection : Connection
 {
     private readonly Func<CancellationToken, ValueTask>? connectHandler;
 
@@ -17,14 +17,14 @@ internal class TcpClientConnection : Connection
 
     private readonly Func<NetworkStream, CancellationToken, ValueTask<Stream?>>? streamModifier;
 
-    private readonly TcpClient client;
+    private readonly Socket socket;
 
     private Stream? stream;
 
     private byte[]? currentReadBufferFromPool;
 
-    public TcpClientConnection(
-        TcpClient client,
+    public TcpConnection(
+        Socket socket,
         bool useSendQueue,
         bool usePingTimer,
         Func<CancellationToken, ValueTask>? connectHandler = null,
@@ -32,7 +32,7 @@ internal class TcpClientConnection : Connection
         Func<NetworkStream, CancellationToken, ValueTask<Stream?>>? streamModifier = null)
         : base(useSendQueue, usePingTimer)
     {
-        this.client = client ?? throw new ArgumentNullException(nameof(client));
+        this.socket = socket ?? throw new ArgumentNullException(nameof(socket));
         this.connectHandler = connectHandler;
         this.closeHandler = closeHandler;
         this.streamModifier = streamModifier;
@@ -109,7 +109,7 @@ internal class TcpClientConnection : Connection
             if (this.connectHandler is { } connectHandler)
                 await connectHandler(cancellationToken).ConfigureAwait(false);
 
-            var ns = new NetworkStream(this.client.Client, ownsSocket: false);
+            var ns = new NetworkStream(this.socket, ownsSocket: false);
             this.stream = ns;
 
             if (this.streamModifier is not null)
@@ -142,8 +142,8 @@ internal class TcpClientConnection : Connection
         await base.HandleCloseAsync().ConfigureAwait(false);
 
         // Dispose the stream.
-        // Note: Disposing the TcpClient itself should be done by the caller
-        // because he passed the instance to us.
+        // Note: Disposing the Socket itself should be done by the caller
+        // because they passed the instance to us.
         if (this.stream is not null)
             await this.stream.DisposeAsync().ConfigureAwait(false);
 
@@ -155,13 +155,13 @@ internal class TcpClientConnection : Connection
         if (normalClose)
         {
             // Shutdown the send channel.
-            this.client.Client.Shutdown(SocketShutdown.Send);
+            this.socket.Shutdown(SocketShutdown.Send);
         }
         else
         {
             // Close the socket with a timeout of 0, so that it resets
             // the connection.
-            this.client.Client.Close(0);
+            this.socket.Close(0);
         }
 
         return default;
@@ -176,7 +176,7 @@ internal class TcpClientConnection : Connection
         if (textMessage)
         {
             throw new ArgumentException(
-                $"Only binary messages are supported with the {nameof(TcpClientConnection)}.");
+                $"Only binary messages are supported with the {nameof(TcpConnection)}.");
         }
 
         try

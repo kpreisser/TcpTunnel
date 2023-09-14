@@ -11,7 +11,7 @@ namespace TcpTunnel.Proxy;
 
 internal class ProxyTunnelConnection<T>
 {
-    private readonly TcpClient remoteClient;
+    private readonly Socket remoteSocket;
 
     // can be null if we don't need to connect
     private readonly Func<CancellationToken, ValueTask>? connectHandler;
@@ -48,13 +48,13 @@ internal class ProxyTunnelConnection<T>
     private T? data;
 
     public ProxyTunnelConnection(
-        TcpClient remoteClient,
+        Socket remoteSocket,
         Func<CancellationToken, ValueTask>? connectHandler,
         Action<Memory<byte>> receiveHandler,
         Action<int> transmitWindowUpdateHandler,
         Action<bool> connectionFinishedHandler)
     {
-        this.remoteClient = remoteClient;
+        this.remoteSocket = remoteSocket;
         this.connectHandler = connectHandler;
         this.receiveHandler = receiveHandler;
         this.transmitWindowUpdateHandler = transmitWindowUpdateHandler;
@@ -158,7 +158,7 @@ internal class ProxyTunnelConnection<T>
 
         try
         {
-            var remoteClientStream = default(NetworkStream);
+            var remoteSocketStream = default(NetworkStream);
             var transmitTask = default(Task);
 
             try
@@ -166,11 +166,11 @@ internal class ProxyTunnelConnection<T>
                 if (this.connectHandler is not null)
                     await this.connectHandler(this.cts.Token);
 
-                remoteClientStream = new NetworkStream(remoteClient.Client, ownsSocket: false);
+                remoteSocketStream = new NetworkStream(this.remoteSocket, ownsSocket: false);
 
                 // After connecting, create the transmit task.
                 transmitTask = ExceptionUtils.StartTask(
-                    () => this.RunTransmitTaskAsync(remoteClientStream));
+                    () => this.RunTransmitTaskAsync(remoteSocketStream));
 
                 // Now start to receive.
                 int currentWindow = 0;
@@ -178,7 +178,7 @@ internal class ProxyTunnelConnection<T>
                 while (true)
                 {
                     // Wait until more data is available.
-                    await remoteClientStream.ReadAsync(Memory<byte>.Empty, this.cts.Token);
+                    await remoteSocketStream.ReadAsync(Memory<byte>.Empty, this.cts.Token);
 
                     // Collect the available window, then receive the data.
                     currentWindow = await CollectAvailableWindowAsync(currentWindow);
@@ -191,7 +191,7 @@ internal class ProxyTunnelConnection<T>
                         // We can call the synchronous Read method without passing a
                         // CancellationToken since it should return immediately (as we know
                         // there is data available), which should be less expensive.
-                        int received = remoteClientStream.Read(
+                        int received = remoteSocketStream.Read(
                             receiveBuffer.AsSpan()[..Math.Min(receiveBuffer.Length, currentWindow)]);
 
                         // Invoke the receive handler. When the received length is 0, the partner
@@ -244,7 +244,7 @@ internal class ProxyTunnelConnection<T>
                     await transmitTask;
                 }
 
-                await (remoteClientStream?.DisposeAsync() ?? default);
+                await (remoteSocketStream?.DisposeAsync() ?? default);
                 this.transmitDataQueueSemaphore.Dispose();
             }
         }
@@ -276,9 +276,9 @@ internal class ProxyTunnelConnection<T>
             try
             {
                 if (isAbort || ctsWasCanceled)
-                    this.remoteClient.Client.Close(0);
+                    this.remoteSocket.Close(0);
 
-                this.remoteClient.Dispose();
+                this.remoteSocket.Dispose();
             }
             catch (Exception ex) when (ex.CanCatch())
             {
@@ -313,7 +313,7 @@ internal class ProxyTunnelConnection<T>
         }
     }
 
-    private async Task RunTransmitTaskAsync(NetworkStream remoteClientStream)
+    private async Task RunTransmitTaskAsync(NetworkStream remoteSocketStream)
     {
         try
         {
@@ -328,13 +328,13 @@ internal class ProxyTunnelConnection<T>
                 if (data.Length is 0)
                 {
                     // Close the connection and return.
-                    this.remoteClient.Client.Shutdown(SocketShutdown.Send);
+                    this.remoteSocket.Shutdown(SocketShutdown.Send);
                     return;
                 }
 
                 // Send the packet.
-                await remoteClientStream.WriteAsync(data, this.cts.Token);
-                await remoteClientStream.FlushAsync(this.cts.Token);
+                await remoteSocketStream.WriteAsync(data, this.cts.Token);
+                await remoteSocketStream.FlushAsync(this.cts.Token);
 
                 // Update the transmit window.
                 checked

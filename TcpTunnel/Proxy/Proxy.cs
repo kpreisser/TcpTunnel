@@ -65,7 +65,7 @@ public partial class Proxy : IInstance
 
     private Task? readTask;
     private CancellationTokenSource? readTaskCts;
-    private TcpClientFramingConnection? gatewayConnection;
+    private TcpFramingConnection? gatewayConnection;
 
     private ProxyServerListener? listener;
 
@@ -150,7 +150,7 @@ public partial class Proxy : IInstance
             // First, start the listener to ensure we can actually listen on all specified ports.
             this.listener = new ProxyServerListener(
                 this.proxyServerConnectionDescriptors,
-                this.AcceptProxyServerClient);
+                this.AcceptProxyServerSocket);
 
             this.listener.Start();
         }
@@ -186,14 +186,14 @@ public partial class Proxy : IInstance
             {
                 readTaskCancellationToken.ThrowIfCancellationRequested();
 
-                var client = new TcpClient();
+                var socket = new Socket(SocketType.Stream, ProtocolType.Tcp);
 
                 bool wasConnected = false;
                 var caughtException = default(Exception);
                 try
                 {
-                    var gatewayConnection = new TcpClientFramingConnection(
-                        client,
+                    var gatewayConnection = new TcpFramingConnection(
+                        socket,
                         useSendQueue: true,
                         usePingTimer: false,
                         connectHandler: async cancellationToken =>
@@ -201,17 +201,17 @@ public partial class Proxy : IInstance
                             // Note: We will log the "Connected" message in the stream modifier
                             // callback, because only after that the connection can considered
                             // to be fully established.
-                            await client.ConnectAsync(
+                            await socket.ConnectAsync(
                                 this.gatewayHost,
                                 this.gatewayPort,
                                 cancellationToken);
 
                             // After the socket is connected, configure it to disable the Nagle
                             // algorithm, disable delayed ACKs, and enable TCP keep-alive.
-                            SocketConfigurator.ConfigureSocket(client.Client, enableKeepAlive: true);
+                            SocketConfigurator.ConfigureSocket(socket, enableKeepAlive: true);
 
                             // Use a smaller socket send buffer size to reduce buffer bloat.
-                            client.Client.SendBufferSize = Constants.SocketSendBufferSize;
+                            socket.SendBufferSize = Constants.SocketSendBufferSize;
                         },
                         streamModifier: async (networkStream, cancellationToken) =>
                         {
@@ -265,7 +265,7 @@ public partial class Proxy : IInstance
                 {
                     try
                     {
-                        client.Dispose();
+                        socket.Dispose();
                     }
                     catch (Exception ex) when (ex.CanCatch())
                     {
@@ -297,7 +297,7 @@ public partial class Proxy : IInstance
 
     private async Task RunPingTaskAsync(
         SemaphoreSlim pingTimerSemaphore,
-        TcpClientFramingConnection gatewayConnection)
+        TcpFramingConnection gatewayConnection)
     {
         while (true)
         {
@@ -310,7 +310,7 @@ public partial class Proxy : IInstance
     }
 
     private async Task RunConnectionAsync(
-        TcpClientFramingConnection gatewayConnection,
+        TcpFramingConnection gatewayConnection,
         CancellationToken cancellationToken)
     {
         try
@@ -460,27 +460,27 @@ public partial class Proxy : IInstance
                                     if (activeConnections.ContainsKey(connectionId))
                                         throw new InvalidDataException();
 
-                                    var remoteClient = new TcpClient();
+                                    var remoteSocket = new Socket(SocketType.Stream, ProtocolType.Tcp);
 
                                     this.StartTcpTunnelConnection(
                                         gatewayConnection,
                                         partnerProxyId,
                                         activeConnections,
                                         connectionId,
-                                        remoteClient,
+                                        remoteSocket,
                                         async cancellationToken =>
                                         {
-                                            await remoteClient.ConnectAsync(hostname, port, cancellationToken);
+                                            await remoteSocket.ConnectAsync(hostname, port, cancellationToken);
 
                                             // After the socket is connected, configure it to disable the Nagle
                                             // algorithm, disable delayed ACKs, and enable TCP keep-alive.
                                             SocketConfigurator.ConfigureSocket(
-                                                remoteClient.Client,
+                                                remoteSocket,
                                                 enableKeepAlive: true);
 
                                             // Additionally, use a smaller socket send buffer size to reduce
                                             // buffer bloat.
-                                            remoteClient.Client.SendBufferSize = Constants.SocketSendBufferSize;
+                                            remoteSocket.SendBufferSize = Constants.SocketSendBufferSize;
                                         });
                                 }
                             }
@@ -598,18 +598,18 @@ public partial class Proxy : IInstance
     }
 
     private void StartTcpTunnelConnection(
-        TcpClientFramingConnection gatewayConnection,
+        TcpFramingConnection gatewayConnection,
         long partnerProxyId,
         Dictionary<long, ProxyTunnelConnection<TunnelConnectionData>> activeConnections,
         long connectionId,
-        TcpClient remoteClient,
+        Socket remoteSocket,
         Func<CancellationToken, ValueTask>? connectHandler = null)
     {
         Debug.Assert(Monitor.IsEntered(this.syncRoot));
 
         var connection = default(ProxyTunnelConnection<TunnelConnectionData>);
         connection = new(
-            remoteClient,
+            remoteSocket,
             connectHandler,
             receiveHandler: receiveBuffer =>
             {
@@ -714,7 +714,7 @@ public partial class Proxy : IInstance
         connection.Start();
     }
 
-    private void HandlePartnerProxyAvailable(TcpClientFramingConnection gatewayConnection, long partnerProxyId)
+    private void HandlePartnerProxyAvailable(TcpFramingConnection gatewayConnection, long partnerProxyId)
     {
         lock (this.syncRoot)
         {
@@ -768,18 +768,18 @@ public partial class Proxy : IInstance
         }
     }
 
-    private void AcceptProxyServerClient(
+    private void AcceptProxyServerSocket(
         long connectionId,
-        TcpClient client,
+        Socket socket,
         ProxyServerConnectionDescriptor descriptor)
     {
         // After the socket is connected, configure it to disable the Nagle
         // algorithm, disable delayed ACKs, and enable TCP keep-alive.
-        SocketConfigurator.ConfigureSocket(client.Client, enableKeepAlive: true);
+        SocketConfigurator.ConfigureSocket(socket, enableKeepAlive: true);
 
         // Additionally, use a smaller socket send buffer size to reduce
         // buffer bloat.
-        client.Client.SendBufferSize = Constants.SocketSendBufferSize;
+        socket.SendBufferSize = Constants.SocketSendBufferSize;
 
         lock (this.syncRoot)
         {
@@ -791,8 +791,8 @@ public partial class Proxy : IInstance
                 // connection.
                 try
                 {
-                    client.Client.Close(0);
-                    client.Dispose();
+                    socket.Close(0);
+                    socket.Dispose();
                 }
                 catch (Exception ex) when (ex.CanCatch())
                 {
@@ -833,7 +833,7 @@ public partial class Proxy : IInstance
                 Constants.ProxyClientId,
                 activeConnections,
                 connectionId,
-                client);
+                socket);
         }
     }
 }

@@ -40,8 +40,8 @@ namespace TcpTunnel.Gateway;
 internal class GatewayProxyConnectionHandler
 {
     private readonly Gateway gateway;
-    private readonly TcpClientFramingConnection proxyConnection;
-    private readonly EndPoint clientEndpoint;
+    private readonly TcpFramingConnection proxyConnection;
+    private readonly EndPoint remoteEndpoint;
 
     private long proxyId;
     private Session? authenticatedSession;
@@ -50,12 +50,12 @@ internal class GatewayProxyConnectionHandler
 
     public GatewayProxyConnectionHandler(
         Gateway gateway,
-        TcpClientFramingConnection proxyConnection,
-        EndPoint clientEndpoint)
+        TcpFramingConnection proxyConnection,
+        EndPoint remoteEndpoint)
     {
         this.gateway = gateway;
         this.proxyConnection = proxyConnection;
-        this.clientEndpoint = clientEndpoint;
+        this.remoteEndpoint = remoteEndpoint;
     }
 
     public async Task RunAsync(CancellationToken cancellationToken)
@@ -147,10 +147,10 @@ internal class GatewayProxyConnectionHandler
                             // Authentication.
                             // The proxy-client will always have ID 0.
                             bool isProxyClient = packetBuffer.Span[1] is 0x00;
-                            var clientPrerequisite = packetBuffer[2..][..Constants.loginPrerequisiteBytes.Length];
+                            var loginPrerequisite = packetBuffer[2..][..Constants.loginPrerequisiteBytes.Length];
 
                             bool couldAuthenticate = false;
-                            if (clientPrerequisite.Span.SequenceEqual(Constants.loginPrerequisiteBytes.Span))
+                            if (loginPrerequisite.Span.SequenceEqual(Constants.loginPrerequisiteBytes.Span))
                             {
                                 int sessionId = BinaryPrimitives.ReadInt32BigEndian(
                                     packetBuffer.Span[(2 + Constants.loginPrerequisiteBytes.Length)..]);
@@ -175,7 +175,7 @@ internal class GatewayProxyConnectionHandler
                                         couldAuthenticate = true;
 
                                         this.gateway.Logger?.Invoke(
-                                            $"Proxy '{this.clientEndpoint}' authenticated for Session ID '{sessionId}' " +
+                                            $"Proxy '{this.remoteEndpoint}' authenticated for Session ID '{sessionId}' " +
                                             $"({(isProxyClient ? "proxy-client" : "proxy-server")}).");
 
                                         // Enter the lock again. We don't need to check whether

@@ -13,7 +13,7 @@ internal class ProxyServerListener
 {
     private readonly IReadOnlyList<ProxyServerConnectionDescriptor> connectionDescriptors;
 
-    private readonly Action<long, TcpClient, ProxyServerConnectionDescriptor> clientAcceptor;
+    private readonly Action<long, Socket, ProxyServerConnectionDescriptor> socketAcceptor;
 
     private readonly object syncRoot = new();
 
@@ -25,10 +25,10 @@ internal class ProxyServerListener
 
     public ProxyServerListener(
         IReadOnlyList<ProxyServerConnectionDescriptor> connectionDescriptors,
-        Action<long, TcpClient, ProxyServerConnectionDescriptor> clientAcceptor)
+        Action<long, Socket, ProxyServerConnectionDescriptor> socketAcceptor)
     {
         this.connectionDescriptors = connectionDescriptors;
-        this.clientAcceptor = clientAcceptor;
+        this.socketAcceptor = socketAcceptor;
     }
 
     public void Start()
@@ -116,10 +116,10 @@ internal class ProxyServerListener
     {
         while (true)
         {
-            TcpClient client;
+            Socket socket;
             try
             {
-                client = await listener.AcceptTcpClientAsync(cancellationToken);
+                socket = await listener.AcceptSocketAsync(cancellationToken);
             }
             catch (SocketException)
             {
@@ -133,14 +133,14 @@ internal class ProxyServerListener
                 break;
             }
 
-            // Handle the client.
+            // Handle the socket.
             long newConnectionId;
             lock (this.syncRoot)
             {
                 newConnectionId = checked(this.nextConnectionId++);
             }
 
-            this.clientAcceptor(newConnectionId, client, connectionDescriptor);
+            this.socketAcceptor(newConnectionId, socket, connectionDescriptor);
         }
     }
 }

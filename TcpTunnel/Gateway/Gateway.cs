@@ -160,10 +160,10 @@ public class Gateway : IInstance
         {
             while (true)
             {
-                TcpClient client;
+                Socket socket;
                 try
                 {
-                    client = await listener.AcceptTcpClientAsync(cancellationToken);
+                    socket = await listener.AcceptSocketAsync(cancellationToken);
                 }
                 catch (SocketException)
                 {
@@ -179,7 +179,7 @@ public class Gateway : IInstance
 
                 // After the socket is connected, configure it to disable the Nagle
                 // algorithm, disable delayed ACKs, and enable TCP keep-alive.
-                SocketConfigurator.ConfigureSocket(client.Client, enableKeepAlive: true);
+                SocketConfigurator.ConfigureSocket(socket, enableKeepAlive: true);
 
                 // Additionally, we use a smaller send buffer (32 KiB instead of 64 KiB) to
                 // reduce buffer bloat between the proxy connections. This ensures e.g. window
@@ -188,13 +188,13 @@ public class Gateway : IInstance
                 // Windows will still buffer a lot more data than the receive
                 // buffer size (in my tests it was about 2.5 MiB); I'm not yet sure what causes
                 // this.
-                client.Client.SendBufferSize = Constants.SocketSendBufferSize;
+                socket.SendBufferSize = Constants.SocketSendBufferSize;
 
-                var remoteEndpoint = client.Client.RemoteEndPoint!;
+                var remoteEndpoint = socket.RemoteEndPoint!;
                 this.logger?.Invoke($"Accepted connection from '{remoteEndpoint}'.");
 
-                var proxyConnection = new TcpClientFramingConnection(
-                    client,
+                var proxyConnection = new TcpFramingConnection(
+                    socket,
                     useSendQueue: true,
                     usePingTimer: true,
                     streamModifier: streamModifier);
@@ -218,7 +218,7 @@ public class Gateway : IInstance
                         {
                             try
                             {
-                                client.Dispose();
+                                socket.Dispose();
                             }
                             catch (Exception ex) when (ex.CanCatch())
                             {

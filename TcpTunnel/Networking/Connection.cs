@@ -165,14 +165,14 @@ internal abstract partial class Connection
     /// </remarks>
     /// <param name="maxLength">The maximum packet length.</param>
     /// <param name="cancellationToken"></param>
-    /// <returns>The next packet, or <c>null</c> of the client closed the connection</returns>
+    /// <returns>The next packet, or <c>null</c> if the peer closed the connection.</returns>
     /// <exception cref="Exception">If an I/O error occurs</exception>
     public abstract ValueTask<ReceivedMessage?> ReceiveMessageAsync(
         int maxLength,
         CancellationToken cancellationToken);
 
     /// <summary>
-    /// Resets the ping timer after receiving a client's ping message.
+    /// Resets the ping timer after receiving a peer's ping message.
     /// </summary>
     public void HandlePing()
     {
@@ -576,7 +576,7 @@ internal abstract partial class Connection
             }
             else
             {
-                // Client has run into a time-out; therefore we need to abort the
+                // Peer has run into a time-out; therefore we need to abort the
                 // connection.
                 if (!ignorePingTimeout)
                 {
