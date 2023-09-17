@@ -6,7 +6,6 @@
     <OutputType>Exe</OutputType>
     <Nullable>enable</Nullable>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <ServerGarbageCollection>true</ServerGarbageCollection>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)'=='Release'">
