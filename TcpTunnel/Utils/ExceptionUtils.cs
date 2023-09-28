@@ -91,4 +91,63 @@ internal static class ExceptionUtils
     {
         return Task.Run(() => WrapTaskForHandlingUnhandledExceptions(asyncFunc));
     }
+
+    /// <summary>
+    /// Registers a first-chance exception handler that will ensure to terminate the
+    /// application when an <see cref="OutOfMemoryException"/> occurs as a first-chance
+    /// exception.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This method should be called once on application start-up (e.g. in the <c>Main</c>
+    /// method).
+    /// </para>
+    /// <para>
+    /// Similar as to <see cref="CanCatch(Exception)"/>, this handler ensures that an
+    /// <see cref="OutOfMemoryException"/> cannot be caught, and prevents finally
+    /// handlers from running in such a case. This is because an OOME might be thrown
+    /// at any place where an allocation can occur, and in most cases we are not able
+    /// to guarantee that the application is still in a "good" (well-defined) state when
+    /// this happens.
+    /// Additionally, running finally handlers in case of an OOME (even if the OOME itself
+    /// isn't caught) might cause unexpected behavior, like waiting for some task that
+    /// will never complete, or releasing a lock in the current thread which might allow
+    /// other threads to enter the lock (shortly before terminating the app) and see an
+    /// inconsistent state.
+    /// </para>
+    /// <para>
+    /// In contrast to using <see cref="CanCatch(Exception)"/> in an exception filter,
+    /// registering a first-chance exception handler ensures that an
+    /// <see cref="OutOfMemoryException"/> is also not caught in external code (like
+    /// the .NET BCL or external libraries), as those might also not be prepared to
+    /// handle them, or they might handle them in a way we don't expect (e.g. they
+    /// might catch the exception so that the app doesn't crash, but then some
+    /// functionality might no longer work).
+    /// </para>
+    /// <para>
+    /// Additionally, this allows us to save us from reasoning about whether there are
+    /// any <c>finally</c> handlers which we need to prevent from running in case of an
+    /// <see cref="OutOfMemoryException"/>, by using an exception filter calling
+    /// <see cref="CanCatch(Exception)"/>.
+    /// </para>
+    /// <para>
+    /// Effectively, this means we will treat an <see cref="OutOfMemoryException"/> the
+    /// same as other corrupted state exceptions like <see cref="StackOverflowException"/>
+    /// and <see cref="AccessViolationException"/>, which also can't be caught in a .NET
+    /// application.
+    /// </para>
+    /// </remarks>
+    public static void RegisterFirstChanceOutOfMemoryExceptionHandler()
+    {
+        AppDomain.CurrentDomain.FirstChanceException += (s, e) =>
+        {
+            // Ensure that an OOME will terminate the process.
+            // Note: When the system is low on memory, the runtime might even
+            // fail to allocate the OutOfMemoryException object (or the
+            // FirstChanceExceptionEventArgs object).
+            // We rely on the runtime terminating the app by itself in such a case.
+            if (e.Exception is OutOfMemoryException)
+                CanCatch(e.Exception);
+        };
+    }
 }

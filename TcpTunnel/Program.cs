@@ -3,6 +3,7 @@ using System.Threading;
 
 using TcpTunnel.Runner;
 using TcpTunnel.ServiceSupport;
+using TcpTunnel.Utils;
 
 namespace TcpTunnel
 {
@@ -10,6 +11,10 @@ namespace TcpTunnel
     {
         static void Main(string[] args)
         {
+            // Ensure to register a handler that terminates the app in case of an OOME.
+            // See the method docs for more information.
+            ExceptionUtils.RegisterFirstChanceOutOfMemoryExceptionHandler();
+
             if (OperatingSystem.IsWindows() && Array.IndexOf(args, "-service") >= 0)
             {
                 // Run the application as a service.
