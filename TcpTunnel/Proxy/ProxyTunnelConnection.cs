@@ -263,11 +263,9 @@ internal class ProxyTunnelConnection<T>
             // transmit task to finish (for example, if the transmit task encountered
             // an exception and therefore called Abort() which we need to report to
             // the partner proxy, or if the partner proxy sent an abort message).
-            bool ctsWasCanceled;
-
             lock (this.syncRoot)
             {
-                ctsWasCanceled = this.cts.Token.IsCancellationRequested;
+                isAbort = isAbort || this.cts.Token.IsCancellationRequested;
                 this.ctsDisposed = true;
             }
 
@@ -275,7 +273,7 @@ internal class ProxyTunnelConnection<T>
 
             try
             {
-                if (isAbort || ctsWasCanceled)
+                if (isAbort)
                     this.remoteSocket.Close(0);
 
                 this.remoteSocket.Dispose();
@@ -286,7 +284,7 @@ internal class ProxyTunnelConnection<T>
             }
 
             // Notify that the connection is finished, and report whether it was aborted.
-            this.connectionFinishedHandler?.Invoke(isAbort || ctsWasCanceled);
+            this.connectionFinishedHandler?.Invoke(isAbort);
         }
 
         async ValueTask<int> CollectAvailableWindowAsync(int currentWindow)
