@@ -745,7 +745,7 @@ public partial class Proxy : IInstance
             // We need to copy the list since we wait for the connections to exit,
             // and they might want to remove themselves from the list in the
             // meanwhile.
-            var connectionsToWait = new List<ProxyTunnelConnection<TunnelConnectionData>>();
+            ProxyTunnelConnection<TunnelConnectionData>[] connectionsToWait;
 
             lock (this.syncRoot)
             {
@@ -753,7 +753,7 @@ public partial class Proxy : IInstance
                 // connections to the list until we call HandlePartnerProxyAvailable
                 // again.
                 this.activePartnerProxiesAndConnections.Remove(partnerProxyId);
-                connectionsToWait.AddRange(activeConnections.Values);
+                connectionsToWait = activeConnections.Values.ToArray();
             }
 
             foreach (var pair in connectionsToWait)

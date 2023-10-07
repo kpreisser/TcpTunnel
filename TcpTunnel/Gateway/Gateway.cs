@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Net.Security;
 using System.Net.Sockets;
@@ -250,11 +251,11 @@ public class Gateway : IInstance
             // Wait for the connections to finish.
             // Need to add the tasks in a separate list, because the handlers also
             // remove themselves from that dictionary.
-            var tasksToWaitFor = new List<Task>();
+            Task[] tasksToWaitFor;
 
             lock (activeHandlers)
             {
-                tasksToWaitFor.AddRange(activeHandlers.Values);
+                tasksToWaitFor = activeHandlers.Values.ToArray();
             }
 
             // After releasing the lock, wait for the tasks.
