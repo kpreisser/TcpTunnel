@@ -1,5 +1,4 @@
 ﻿using System;
-using SystemSslProcotols = System.Security.Authentication.SslProtocols;
 
 namespace TcpTunnel;
 
@@ -21,8 +20,6 @@ internal class Constants
     // Use a smaller size (32 KiB instead of 64 KiB) for the socket's send buffer size, to reduce
     // buffer bloat. It should not be much smaller than the ReceiveBufferSize.
     public static int SocketSendBufferSize = 32768;
-
-    public const SystemSslProcotols SslProtocols = SystemSslProcotols.Tls12 | SystemSslProcotols.Tls13;
 
     public const byte TypeProxyToProxyCommunication = 0x20;
 

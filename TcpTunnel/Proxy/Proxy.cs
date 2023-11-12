@@ -225,8 +225,7 @@ public partial class Proxy : IInstance
                                     await sslStream.AuthenticateAsClientAsync(
                                         new SslClientAuthenticationOptions()
                                         {
-                                            TargetHost = this.gatewayHost,
-                                            EnabledSslProtocols = Constants.SslProtocols
+                                            TargetHost = this.gatewayHost
                                         },
                                         cancellationToken);
                                 }

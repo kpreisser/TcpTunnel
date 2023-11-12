@@ -278,8 +278,7 @@ public class Gateway : IInstance
                     await sslStream.AuthenticateAsServerAsync(
                         new SslServerAuthenticationOptions()
                         {
-                            ServerCertificate = certificate,
-                            EnabledSslProtocols = Constants.SslProtocols
+                            ServerCertificate = certificate
                         },
                         cancellationToken);
                 }
