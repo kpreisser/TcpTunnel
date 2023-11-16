@@ -1,6 +1,6 @@
 # TcpTunnel
 
-TcpTunnel is a program implemented in C# (.NET 7.0) that allows to tunnel TCP connections through a server (gateway)
+TcpTunnel is a program implemented in C# (.NET 8.0) that allows to tunnel TCP connections through a server (gateway)
 to a remote machine, for example to access services that are running behind a firewall or NAT
 (like a reverse-connect mechanism).
 
@@ -78,12 +78,12 @@ will then be run by a single application process.
 
 ## Building
 
-- Install the [.NET 7.0 SDK](https://dotnet.microsoft.com/download) or higher.
+- Install the [.NET 8.0 SDK](https://dotnet.microsoft.com/download) or higher.
 - On Windows, you can use one of the `PUBLISH-xyz.cmd` files to publish the app, either as self-contained app
   (with native AOT compilation), or as framework-dependent app (so it needs the .NET Runtime to be installed).
 - Otherwise, you can publish for the current platform with the following command (as self-contained app): 
   ```
-  dotnet publish "TcpTunnel/TcpTunnel.csproj" -f net7.0 -c Release -p:PublishSingleFile=true --self-contained
+  dotnet publish "TcpTunnel/TcpTunnel.csproj" -f net8.0 -c Release -p:PublishSingleFile=true --self-contained
   ```
 
 ## Possible Development TODOs
