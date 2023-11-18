@@ -35,8 +35,8 @@ internal class Constants
     /// In order to authenticate, the remote party must send this string along with its
     /// credentials. The host will only perform authentication if it received this string.
     /// Due to the number of bytes this string takes, an attacker can only send a lot less
-    /// authentication requests for a specific given of bytes than without this string,
-    /// this reducing the number of possible brute force attacks for a given throughput.
+    /// authentication requests for a given number of bytes than without this string,
+    /// thus reducing the number of possible brute force attacks for a given throughput.
     /// </remarks>
     public static readonly ReadOnlyMemory<byte> loginPrerequisiteBytes = new byte[]
     {
