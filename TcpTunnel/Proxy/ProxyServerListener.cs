@@ -13,7 +13,7 @@ internal class ProxyServerListener
 {
     private readonly IReadOnlyList<ProxyServerConnectionDescriptor> connectionDescriptors;
 
-    private readonly Action<long, Socket, ProxyServerConnectionDescriptor> socketAcceptor;
+    private readonly Action<ulong, Socket, ProxyServerConnectionDescriptor> socketAcceptor;
 
     private readonly object syncRoot = new();
 
@@ -21,11 +21,11 @@ internal class ProxyServerListener
 
     private CancellationTokenSource? listenersCts;
 
-    private long nextConnectionId;
+    private ulong nextConnectionId;
 
     public ProxyServerListener(
         IReadOnlyList<ProxyServerConnectionDescriptor> connectionDescriptors,
-        Action<long, Socket, ProxyServerConnectionDescriptor> socketAcceptor)
+        Action<ulong, Socket, ProxyServerConnectionDescriptor> socketAcceptor)
     {
         this.connectionDescriptors = connectionDescriptors;
         this.socketAcceptor = socketAcceptor;
@@ -134,10 +134,24 @@ internal class ProxyServerListener
             }
 
             // Handle the socket.
-            long newConnectionId;
+            ulong newConnectionId;
+
             lock (this.syncRoot)
             {
-                newConnectionId = checked(this.nextConnectionId++);
+                // Assign a new connection ID. We use a checked clause because currently
+                // a connection ID must never be resued (for a given proxy-to-proxy
+                // connection). Using an UInt64 should provide enough IDs as long as the
+                // app runs.
+                try
+                {
+                    newConnectionId = checked(this.nextConnectionId++);
+                }
+                catch (OverflowException ex)
+                {
+                    // Should never occur in practice.
+                    Environment.FailFast(ex.Message, ex);
+                    throw; // Satisfy CFA
+                }
             }
 
             this.socketAcceptor(newConnectionId, socket, connectionDescriptor);

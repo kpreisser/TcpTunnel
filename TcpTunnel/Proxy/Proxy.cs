@@ -72,9 +72,9 @@ public partial class Proxy : IInstance
     /// <summary>
     /// The dictionary of active connections.
     /// </summary>
-    private readonly Dictionary<long /* proxyId */,
-        Dictionary<long /* connectionId */, ProxyTunnelConnection<TunnelConnectionData>>> activePartnerProxiesAndConnections =
-        new();
+    private readonly Dictionary<ulong /* proxyId */,
+        Dictionary<ulong /* connectionId */, ProxyTunnelConnection<TunnelConnectionData>>> activePartnerProxiesAndConnections =
+        [];
 
     public Proxy(
         string gatewayHost,
@@ -98,17 +98,17 @@ public partial class Proxy : IInstance
 
     private static (byte[] messageToSend, Memory<byte> coreMessage) PreparePartnerProxyMessage(
         int length,
-        long? remoteProxyId)
+        ulong? remoteProxyId)
     {
-        var message = new byte[1 + (remoteProxyId is not null ? sizeof(long) : 0) + length];
+        var message = new byte[1 + (remoteProxyId is not null ? sizeof(ulong) : 0) + length];
 
         int pos = 0;
         message[pos++] = Constants.TypeProxyToProxyCommunication;
 
         if (remoteProxyId is not null)
         {
-            BinaryPrimitives.WriteInt64BigEndian(message.AsSpan()[pos..], remoteProxyId.Value);
-            pos += sizeof(long);
+            BinaryPrimitives.WriteUInt64BigEndian(message.AsSpan()[pos..], remoteProxyId.Value);
+            pos += sizeof(ulong);
         }
 
         var coreMessage = message.AsMemory()[pos..][..length];
@@ -119,7 +119,7 @@ public partial class Proxy : IInstance
         Memory<byte> message,
         bool containsPartnerProxyId,
         out Memory<byte> coreMessage,
-        out long? partnerProxyId)
+        out ulong? partnerProxyId)
     {
         if (!(message.Length > 0 && message.Span[0] is Constants.TypeProxyToProxyCommunication))
         {
@@ -133,11 +133,11 @@ public partial class Proxy : IInstance
 
         if (containsPartnerProxyId)
         {
-            if (coreMessage.Length < sizeof(long))
+            if (coreMessage.Length < sizeof(ulong))
                 throw new InvalidDataException();
 
-            partnerProxyId = BinaryPrimitives.ReadInt64BigEndian(coreMessage.Span);
-            coreMessage = coreMessage[sizeof(long)..];
+            partnerProxyId = BinaryPrimitives.ReadUInt64BigEndian(coreMessage.Span);
+            coreMessage = coreMessage[sizeof(ulong)..];
         }
 
         return true;
@@ -367,17 +367,17 @@ public partial class Proxy : IInstance
                             $"Authentication: " +
                             $"{(authenticationSucceeded ? "Succeeded" : "Failed")}.");
                     }
-                    else if (packetBuffer.Length >= 2 + (isProxyClient ? sizeof(long) : 0) &&
+                    else if (packetBuffer.Length >= 2 + (isProxyClient ? sizeof(ulong) : 0) &&
                         packetBuffer.Span[0] is 0x02)
                     {
                         // New Session Status.
                         packetBuffer = packetBuffer[1..];
 
-                        long? partnerProxyId = null;
+                        ulong? partnerProxyId = null;
                         if (isProxyClient)
                         {
-                            partnerProxyId = BinaryPrimitives.ReadInt64BigEndian(packetBuffer.Span);
-                            packetBuffer = packetBuffer[sizeof(long)..];
+                            partnerProxyId = BinaryPrimitives.ReadUInt64BigEndian(packetBuffer.Span);
+                            packetBuffer = packetBuffer[sizeof(ulong)..];
 
                             if (partnerProxyId is Constants.ProxyClientId)
                                 throw new InvalidDataException();
@@ -402,13 +402,13 @@ public partial class Proxy : IInstance
                         packetBuffer,
                         isProxyClient,
                         out var coreMessage,
-                        out long? partnerProxyIdNullable))
+                        out ulong? partnerProxyIdNullable))
                     {
                         // Proxy to proxy communication.
                         if (partnerProxyIdNullable is { } value && value is Constants.ProxyClientId)
                             throw new InvalidDataException();
 
-                        long partnerProxyId = partnerProxyIdNullable ?? Constants.ProxyClientId;
+                        ulong partnerProxyId = partnerProxyIdNullable ?? Constants.ProxyClientId;
 
                         // We don't need a lock to access the dictionary here since it is
                         // only modified by us (the receiver task). We only need a lock to
@@ -418,8 +418,8 @@ public partial class Proxy : IInstance
                             out var activeConnections))
                             throw new InvalidDataException();
 
-                        long connectionId = BinaryPrimitives.ReadInt64BigEndian(coreMessage.Span);
-                        coreMessage = coreMessage[sizeof(long)..];
+                        ulong connectionId = BinaryPrimitives.ReadUInt64BigEndian(coreMessage.Span);
+                        coreMessage = coreMessage[sizeof(ulong)..];
 
                         if (coreMessage.Length >= 1 + sizeof(int) &&
                             coreMessage.Span[0] is ProxyMessageTypeOpenConnection &&
@@ -439,14 +439,14 @@ public partial class Proxy : IInstance
                                 !this.proxyClientAllowedTargetEndpoints.Contains((hostname, port)))
                             {
                                 // Notify the partner that the connection had to be aborted.
-                                int length = sizeof(long) + 1;
+                                int length = sizeof(ulong) + 1;
 
                                 var (messageToSend, coreMessageToSend) = PreparePartnerProxyMessage(
                                     length,
                                     partnerProxyId);
 
-                                BinaryPrimitives.WriteInt64BigEndian(coreMessageToSend.Span, connectionId);
-                                int pos = sizeof(long);
+                                BinaryPrimitives.WriteUInt64BigEndian(coreMessageToSend.Span, connectionId);
+                                int pos = sizeof(ulong);
 
                                 coreMessageToSend.Span[pos++] = ProxyMessageTypeAbortConnection;
 
@@ -490,7 +490,7 @@ public partial class Proxy : IInstance
                             lock (this.syncRoot)
                             {
                                 // We might fail to find the connectionId if the connection
-                                // was already fully closed.
+                                // was already fully closed or aborted.
                                 activeConnections.TryGetValue(connectionId, out connection);
                             }
 
@@ -569,7 +569,7 @@ public partial class Proxy : IInstance
             finally
             {
                 // Need to copy the keys list since it will be modified by the callee.
-                foreach (long partnerProxyId in this.activePartnerProxiesAndConnections.Keys.ToArray())
+                foreach (ulong partnerProxyId in this.activePartnerProxiesAndConnections.Keys.ToArray())
                     await this.HandlePartnerProxyUnavailableAsync(partnerProxyId);
 
                 pingTimerSemaphore.Release();
@@ -598,9 +598,9 @@ public partial class Proxy : IInstance
 
     private void StartTcpTunnelConnection(
         TcpFramingConnection gatewayConnection,
-        long partnerProxyId,
-        Dictionary<long, ProxyTunnelConnection<TunnelConnectionData>> activeConnections,
-        long connectionId,
+        ulong partnerProxyId,
+        Dictionary<ulong, ProxyTunnelConnection<TunnelConnectionData>> activeConnections,
+        ulong connectionId,
         Socket remoteSocket,
         Func<CancellationToken, ValueTask>? connectHandler = null)
     {
@@ -613,14 +613,14 @@ public partial class Proxy : IInstance
             receiveHandler: receiveBuffer =>
             {
                 // Forward the data packet.
-                int length = sizeof(long) + 1 + receiveBuffer.Length;
+                int length = sizeof(ulong) + 1 + receiveBuffer.Length;
 
                 var (message, coreMessage) = PreparePartnerProxyMessage(
                     length,
                     this.proxyServerConnectionDescriptors is null ? partnerProxyId : null);
 
-                BinaryPrimitives.WriteInt64BigEndian(coreMessage.Span, connectionId);
-                int pos = sizeof(long);
+                BinaryPrimitives.WriteUInt64BigEndian(coreMessage.Span, connectionId);
+                int pos = sizeof(ulong);
 
                 coreMessage.Span[pos++] = ProxyMessageTypeData;
                 receiveBuffer.CopyTo(coreMessage[pos..]);
@@ -631,14 +631,14 @@ public partial class Proxy : IInstance
             transmitWindowUpdateHandler: window =>
             {
                 // Forward the transmit window update.
-                int length = sizeof(long) + 1 + sizeof(int);
+                int length = sizeof(ulong) + 1 + sizeof(int);
 
                 var (message, coreMessage) = PreparePartnerProxyMessage(
                     length,
                     this.proxyServerConnectionDescriptors is null ? partnerProxyId : null);
 
-                BinaryPrimitives.WriteInt64BigEndian(coreMessage.Span, connectionId);
-                int pos = sizeof(long);
+                BinaryPrimitives.WriteUInt64BigEndian(coreMessage.Span, connectionId);
+                int pos = sizeof(ulong);
 
                 coreMessage.Span[pos++] = ProxyMessageTypeUpdateWindow;
                 BinaryPrimitives.WriteInt32BigEndian(coreMessage.Span[pos..], window);
@@ -677,14 +677,14 @@ public partial class Proxy : IInstance
                     // Notify the partner that the connection was aborted.
                     // This must be done before removing the connection from the
                     // `activeConnections` dictionary; see comment below.
-                    int length = sizeof(long) + 1;
+                    int length = sizeof(ulong) + 1;
 
                     var (message, coreMessage) = PreparePartnerProxyMessage(
                         length,
                         this.proxyServerConnectionDescriptors is null ? partnerProxyId : null);
 
-                    BinaryPrimitives.WriteInt64BigEndian(coreMessage.Span, connectionId);
-                    int pos = sizeof(long);
+                    BinaryPrimitives.WriteUInt64BigEndian(coreMessage.Span, connectionId);
+                    int pos = sizeof(ulong);
 
                     coreMessage.Span[pos++] = ProxyMessageTypeAbortConnection;
 
@@ -697,6 +697,10 @@ public partial class Proxy : IInstance
                     // call the `Connection.SendMessageByQueue()` method again, because the
                     // connection may already have stopped (and so calling that method would
                     // throw).
+                    // We might still receive messages for the connection after removing it
+                    // (which the partner proxy has sent before it knew that the connection
+                    // has been aborted), which is OK since we will ignore them (as we won't
+                    // find the connection ID in the dictionary).
                     // Note that the receiveTask is still running (we are being called from it,
                     // so we can't wait for it by calling `StopAsync()`), but at this stage the
                     // connection is considered to be finished and it doesn't have any more
@@ -713,13 +717,13 @@ public partial class Proxy : IInstance
         connection.Start();
     }
 
-    private void HandlePartnerProxyAvailable(TcpFramingConnection gatewayConnection, long partnerProxyId)
+    private void HandlePartnerProxyAvailable(TcpFramingConnection gatewayConnection, ulong partnerProxyId)
     {
         lock (this.syncRoot)
         {
             if (!this.activePartnerProxiesAndConnections.TryAdd(
                 partnerProxyId,
-                new Dictionary<long, ProxyTunnelConnection<TunnelConnectionData>>()))
+                new Dictionary<ulong, ProxyTunnelConnection<TunnelConnectionData>>()))
                 throw new InvalidDataException();
 
             if (this.proxyServerConnectionDescriptors is not null)
@@ -734,7 +738,7 @@ public partial class Proxy : IInstance
         }
     }
 
-    private async ValueTask HandlePartnerProxyUnavailableAsync(long partnerProxyId)
+    private async ValueTask HandlePartnerProxyUnavailableAsync(ulong partnerProxyId)
     {
         if (this.activePartnerProxiesAndConnections.TryGetValue(
             partnerProxyId,
@@ -768,7 +772,7 @@ public partial class Proxy : IInstance
     }
 
     private void AcceptProxyServerSocket(
-        long connectionId,
+        ulong connectionId,
         Socket socket,
         ProxyServerConnectionDescriptor descriptor)
     {
@@ -809,18 +813,18 @@ public partial class Proxy : IInstance
             // done in the same lock, as otherwise it could happen that we would aleady receive
             // messages for the connection but wouldn't find it in the list.
             var hostnameBytes = Encoding.UTF8.GetBytes(descriptor.RemoteHost);
-            int responseLength = sizeof(long) + 1 + sizeof(int) + hostnameBytes.Length;
+            int responseLength = sizeof(ulong) + 1 + sizeof(int) + hostnameBytes.Length;
 
             var (message, coreMessage) = PreparePartnerProxyMessage(responseLength, null);
 
-            BinaryPrimitives.WriteInt64BigEndian(coreMessage.Span, connectionId);
-            coreMessage.Span[sizeof(long)] = ProxyMessageTypeOpenConnection;
+            BinaryPrimitives.WriteUInt64BigEndian(coreMessage.Span, connectionId);
+            coreMessage.Span[sizeof(ulong)] = ProxyMessageTypeOpenConnection;
 
             BinaryPrimitives.WriteInt32BigEndian(
-                coreMessage.Span[(sizeof(long) + 1)..],
+                coreMessage.Span[(sizeof(ulong) + 1)..],
                 descriptor.RemotePort);
 
-            hostnameBytes.CopyTo(coreMessage.Span[(sizeof(long) + 1 + sizeof(int))..]);
+            hostnameBytes.CopyTo(coreMessage.Span[(sizeof(ulong) + 1 + sizeof(int))..]);
 
             // Send the message. From that point, our receiver task might already receive
             // events for the connection, which then need to wait for the lock.

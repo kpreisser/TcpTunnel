@@ -25,12 +25,12 @@ internal class Session
 
     // Contains the partner proxies, keyed by the Proxy ID.
     // Proxy 0 is always the proxy-client; the other ones are proxy-servers.
-    public Dictionary<long, GatewayProxyConnectionHandler> Proxies
+    public Dictionary<ulong, GatewayProxyConnectionHandler> Proxies
     {
         get;
-    } = new();
+    } = [];
 
-    public long NextProxyId
+    public ulong NextProxyId
     {
         get;
         set;

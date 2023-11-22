@@ -28,11 +28,11 @@ namespace TcpTunnel.Gateway;
  *     - 0x00: Auth failed.
  *     - 0x01: Auth successful.
  * - 0x02: (Gateway to Proxy) Session Status (sent after successful authentication if partner proxies are available, and during runtime if status changes):
- *     + [if proxy is proxy-client) Partner Proxy ID (Int64)
+ *     + [if proxy is proxy-client) Partner Proxy ID (UInt64)
  *     + 0x01: Partner proxy is available (in case of proxy-server, this means the proxy needs to acknowledge the new session iteration) or 0x00: Partner proxy is unavailable.
  * - 0x03 (Proxy to Gateway): [if proxy is proxy-server] Acknowledge new session iteration after being informed that the partner proxy is now available.
  * - 0x20 (both directions): Proxy-to-Proxy communication. The gateway forwards the packet to the partner proxy if available [and, in case of proxy-server, if current session iteration has been acknowledged].
- *     + [if sending/receiving proxy is proxy-client] Partner Proxy ID (Int64)
+ *     + [if sending/receiving proxy is proxy-client] Partner Proxy ID (UInt64)
  *     + Further payload is defined by PROXY-TO-PROXY COMMUNICATION.
  * 
  * - 0xFF: Reserved for Ping.
@@ -43,10 +43,10 @@ internal class GatewayProxyConnectionHandler
     private readonly TcpFramingConnection proxyConnection;
     private readonly EndPoint remoteEndpoint;
 
-    private long proxyId;
+    private ulong proxyId;
     private Session? authenticatedSession;
 
-    private int sessionIterationsToAcknowledge;
+    private ulong sessionIterationsToAcknowledge;
 
     public GatewayProxyConnectionHandler(
         Gateway gateway,
@@ -89,12 +89,12 @@ internal class GatewayProxyConnectionHandler
                             if (packetBuffer.Length >= 1 && packetBuffer.Span[0] is 0x03 && !isProxyClient)
                             {
                                 // Acknowledge the current session iteration.
-                                if (this.sessionIterationsToAcknowledge <= 0)
+                                if (this.sessionIterationsToAcknowledge is 0)
                                     throw new InvalidOperationException(); // Invalid message
 
                                 this.sessionIterationsToAcknowledge--;
                             }
-                            else if (packetBuffer.Length >= 1 + (isProxyClient ? sizeof(long) : 0) &&
+                            else if (packetBuffer.Length >= 1 + (isProxyClient ? sizeof(ulong) : 0) &&
                                 packetBuffer.Span[0] is Constants.TypeProxyToProxyCommunication)
                             {
                                 // Proxy-to-proxy communication.
@@ -102,19 +102,19 @@ internal class GatewayProxyConnectionHandler
                                 // the current proxy has acknowledged the current session iteration.
                                 if (isProxyClient)
                                 {
-                                    long partnerProxyId = BinaryPrimitives.ReadInt64BigEndian(packetBuffer.Span[1..]);
+                                    ulong partnerProxyId = BinaryPrimitives.ReadUInt64BigEndian(packetBuffer.Span[1..]);
                                     if (partnerProxyId is Constants.ProxyClientId)
                                         throw new InvalidDataException();
 
                                     if (session.Proxies.TryGetValue(partnerProxyId, out var partnerProxy))
                                     {
                                         // Strip out the proxy ID.
-                                        var targetPacket = new byte[packetBuffer.Length - sizeof(long)];
+                                        var targetPacket = new byte[packetBuffer.Length - sizeof(ulong)];
                                         targetPacket[0] = Constants.TypeProxyToProxyCommunication;
 
                                         // Need to copy the data because it will be queued (and the buffer
                                         // may be reused by the caller).
-                                        packetBuffer[(1 + sizeof(long))..].CopyTo(targetPacket.AsMemory()[1..]);
+                                        packetBuffer[(1 + sizeof(ulong))..].CopyTo(targetPacket.AsMemory()[1..]);
 
                                         partnerProxy.proxyConnection.SendMessageByQueue(targetPacket);
                                     }
@@ -123,12 +123,12 @@ internal class GatewayProxyConnectionHandler
                                     session.Proxies.TryGetValue(Constants.ProxyClientId, out var partnerProxy))
                                 {
                                     // Add the sender proxy ID.
-                                    var targetPacket = new byte[packetBuffer.Length + sizeof(long)];
+                                    var targetPacket = new byte[packetBuffer.Length + sizeof(ulong)];
                                     targetPacket[0] = Constants.TypeProxyToProxyCommunication;
-                                    BinaryPrimitives.WriteInt64BigEndian(targetPacket.AsSpan()[1..], this.proxyId);
+                                    BinaryPrimitives.WriteUInt64BigEndian(targetPacket.AsSpan()[1..], this.proxyId);
 
                                     // See comment above.
-                                    packetBuffer[1..].CopyTo(targetPacket.AsMemory()[(1 + sizeof(long))..]);
+                                    packetBuffer[1..].CopyTo(targetPacket.AsMemory()[(1 + sizeof(ulong))..]);
 
                                     partnerProxy.proxyConnection.SendMessageByQueue(targetPacket);
                                 }
@@ -185,9 +185,19 @@ internal class GatewayProxyConnectionHandler
                                         lock (this.gateway.SyncRoot)
                                         {
                                             this.authenticatedSession = session;
-                                            this.proxyId = isProxyClient ?
-                                                Constants.ProxyClientId :
-                                                checked(session.NextProxyId++);
+
+                                            try
+                                            {
+                                                this.proxyId = isProxyClient ?
+                                                    Constants.ProxyClientId :
+                                                    checked(session.NextProxyId++);
+                                            }
+                                            catch (OverflowException ex)
+                                            {
+                                                // Should never occur in practice.
+                                                Environment.FailFast(ex.Message, ex);
+                                                throw; // Satisfy CFA
+                                            }
 
                                             Debug.Assert(
                                                 isProxyClient || this.proxyId is not Constants.ProxyClientId);
@@ -287,7 +297,16 @@ internal class GatewayProxyConnectionHandler
                     // newly connected proxy-client. For the other direction, this isn't
                     // necessary as the gateway will assign incrementing IDs
                     // to the connected proxy-server instances.
-                    proxyServer.Value.sessionIterationsToAcknowledge++;
+                    try
+                    {
+                        _ = checked(proxyServer.Value.sessionIterationsToAcknowledge++);
+                    }
+                    catch (OverflowException ex)
+                    {
+                        // Should never occur in practice.
+                        Environment.FailFast(ex.Message, ex);
+                        throw; // Satisfy CFA
+                    }
                 }
             }
         }
@@ -311,27 +330,36 @@ internal class GatewayProxyConnectionHandler
                     // messages for a previous proxy-client in its send queue), this
                     // simplifies the handling because we don't need to differentiate
                     // between the initial and later session status messages.
-                    this.sessionIterationsToAcknowledge++;
+                    try
+                    {
+                        _ = checked(this.sessionIterationsToAcknowledge++);
+                    }
+                    catch (OverflowException ex)
+                    {
+                        // Should never occur in practice.
+                        Environment.FailFast(ex.Message, ex);
+                        throw; // Satisfy CFA
+                    }
                 }
             }
         }
     }
 
-    private void SendSessionStatus(long? partnerClientId, bool isAvailable)
+    private void SendSessionStatus(ulong? partnerClientId, bool isAvailable)
     {
         bool isProxyClient = this.proxyId is Constants.ProxyClientId;
         if (isProxyClient != partnerClientId is not null)
             throw new ArgumentException();
 
-        var response = new byte[isProxyClient ? (2 + 8) : 2];
+        var response = new byte[isProxyClient ? (2 + sizeof(ulong)) : 2];
 
         int pos = 0;
         response[pos++] = 0x02;
 
         if (isProxyClient)
         {
-            BinaryPrimitives.WriteInt64BigEndian(response.AsSpan()[pos..], partnerClientId!.Value);
-            pos += sizeof(long);
+            BinaryPrimitives.WriteUInt64BigEndian(response.AsSpan()[pos..], partnerClientId!.Value);
+            pos += sizeof(ulong);
         }
 
         response[pos++] = isAvailable ? (byte)0x01 : (byte)0x00;
