@@ -30,7 +30,7 @@ internal class Session
         get;
     } = [];
 
-    public ulong NextProxyId
+    public ulong NextProxyServerId
     {
         get;
         set;

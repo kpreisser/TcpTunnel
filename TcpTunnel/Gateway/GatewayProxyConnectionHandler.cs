@@ -190,7 +190,7 @@ internal class GatewayProxyConnectionHandler
                                             {
                                                 this.proxyId = isProxyClient ?
                                                     Constants.ProxyClientId :
-                                                    checked(session.NextProxyId++);
+                                                    checked(session.NextProxyServerId++);
                                             }
                                             catch (OverflowException ex)
                                             {
@@ -218,7 +218,17 @@ internal class GatewayProxyConnectionHandler
                                             }
 
                                             // Set the new proxy.
-                                            session.Proxies[this.proxyId] = this;
+                                            try
+                                            {
+                                                session.Proxies[this.proxyId] = this;
+                                            }
+                                            catch (Exception ex) when (ex.CanCatch())
+                                            {
+                                                // There are too many entries in the dictionary
+                                                // (should never happen in practice).
+                                                Environment.FailFast(ex.Message, ex);
+                                                throw; // Satisfy CFA
+                                            }
 
                                             // Inform the partnered proxies about the new
                                             // availability.

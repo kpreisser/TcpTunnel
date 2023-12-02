@@ -713,7 +713,18 @@ public partial class Proxy : IInstance
         Thread.MemoryBarrier();
 
         // Add the connection and start it.
-        activeConnections.Add(connectionId, connection);
+        try
+        {
+            activeConnections.Add(connectionId, connection);
+        }
+        catch (Exception ex) when (ex.CanCatch())
+        {
+            // There are too many entries in the dictionary
+            // (should never happen in practice).
+            Environment.FailFast(ex.Message, ex);
+            throw; // Satisfy CFA
+        }
+
         connection.Start();
     }
 
@@ -721,9 +732,12 @@ public partial class Proxy : IInstance
     {
         lock (this.syncRoot)
         {
+            // If there were too many entries in the dictionary (which should never
+            // happen in practice), this would throw and thus aborting the
+            // connection to the gateway.
             if (!this.activePartnerProxiesAndConnections.TryAdd(
                 partnerProxyId,
-                new Dictionary<ulong, ProxyTunnelConnection<TunnelConnectionData>>()))
+                []))
                 throw new InvalidDataException();
 
             if (this.proxyServerConnectionDescriptors is not null)

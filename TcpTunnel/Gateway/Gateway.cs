@@ -236,7 +236,17 @@ public class Gateway : IInstance
                         }
                     });
 
-                    activeHandlers.Add(handler, runTask);
+                    try
+                    {
+                        activeHandlers.Add(handler, runTask);
+                    }
+                    catch (Exception ex) when (ex.CanCatch())
+                    {
+                        // There are too many entries in the dictionary
+                        // (should never happen in practice).
+                        Environment.FailFast(ex.Message, ex);
+                        throw; // Satisfy CFA
+                    }
                 }
             }
         }
