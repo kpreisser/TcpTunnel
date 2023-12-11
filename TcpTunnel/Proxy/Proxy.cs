@@ -28,13 +28,16 @@ namespace TcpTunnel.Proxy;
  */
 public partial class Proxy : IInstance
 {
-    // The max receive message size mainly arises from the tunnel connection receive buffer size
-    // (32 KiB) plus the additional metadata, which are just a few bytes. Therefore, 256 KiB
-    // should be more than enough.
-    // (But note that e.g. for the target host defined by the user that is sent to the
-    // proxy-client, there is currently no limit enforced, so such messages might theoretically
-    // exceed this size.)
-    public const int MaxReceiveMessageSize = 256 * 1024;
+    // See comments in `Gateway.MaxReceiveMessageSize`. 
+    // We use a size that's a bit larger than the gateway's `MaxReceiveMessageSize` size, to
+    // compensate for the overhead when the gateway forwards a proxy message (which didn't
+    // exceed the gateway's `MaxReceiveMessageSize` when the gateway received it, but would
+    // exceed that size when the gateway forwards the message to the partner proxy, e.g.
+    // through the addition of the partner proxy ID).
+    // This is to ensure we won't throw in such a case, to avoid aborting the connection to
+    // the gateway if we are the proxy-client, as that would also affect all other connected
+    // proxy-servers.
+    public const int MaxReceiveMessageSize = Gateway.Gateway.MaxReceiveMessageSize + 256;
 
     private const int ProxyMessageTypeOpenConnection = 0x00;
     private const int ProxyMessageTypeData = 0x01;
@@ -418,6 +421,16 @@ public partial class Proxy : IInstance
                             out var activeConnections))
                             throw new InvalidDataException();
 
+                        // If we receive a partner proxy message (represented by `coreMessage`)
+                        // that violates the protocol (which would mean the partner proxy would
+                        // be buggy or malicious), instead of throwing (which would abort the
+                        // connection to the gateway), we ignore the message or try to respond
+                        // with an error. Otherwise, if we would throw and we are the
+                        // proxy-client, we would also abort all connections for all other
+                        // proxy-servers that actually behave correctly.
+                        if (coreMessage.Length < sizeof(ulong))
+                            continue;
+
                         ulong connectionId = BinaryPrimitives.ReadUInt64BigEndian(coreMessage.Span);
                         coreMessage = coreMessage[sizeof(ulong)..];
 
@@ -433,11 +446,37 @@ public partial class Proxy : IInstance
                                 coreMessage.Span[(1 + sizeof(int))..]);
 
                             // If the proxyClientAllowedTargetEndpoints list is specified, we need
-                            // to check whether the target endpoint is allowed. Otherwise, we abort
-                            // the connection.
-                            if (this.proxyClientAllowedTargetEndpoints is not null &&
-                                !this.proxyClientAllowedTargetEndpoints.Contains((hostname, port)))
+                            // to check whether the target endpoint is allowed. Otherwise, we
+                            // respond to the partner proxy that the connection was aborted.
+                            // We also do this if the partner proxy server incorrectly uses a
+                            // connection ID that's already in use (for the reasons mentioned
+                            // above).
+                            ProxyTunnelConnection<TunnelConnectionData>? existingConnection;
+                            lock (this.syncRoot)
                             {
+                                activeConnections.TryGetValue(connectionId, out existingConnection);
+                            }
+
+                            if (this.proxyClientAllowedTargetEndpoints is not null &&
+                                !this.proxyClientAllowedTargetEndpoints.Contains((hostname, port)) ||
+                                existingConnection is not null)
+                            {
+                                if (existingConnection is not null)
+                                {
+                                    // Abort the already existing connection. We suppress sending
+                                    // the abort message here, because afterwards we want to send a
+                                    // separate abort message in any case (the existing connection
+                                    // might already be in the stage of being closed and therefore
+                                    // might not always send an abort message afterwards).
+                                    // However, note that this is just kind of a help for debugging
+                                    // the partner proxy, because the protocol has already been
+                                    // violated.
+                                    existingConnection.Data.SuppressSendAbortMessage = true;
+                                    Thread.MemoryBarrier();
+
+                                    await existingConnection.StopAsync();
+                                }
+
                                 // Notify the partner that the connection had to be aborted.
                                 int length = sizeof(ulong) + 1;
 
@@ -456,9 +495,8 @@ public partial class Proxy : IInstance
                             {
                                 lock (this.syncRoot)
                                 {
-                                    if (activeConnections.ContainsKey(connectionId))
-                                        throw new InvalidDataException();
-
+                                    // We already checked above that the connectionId is currently
+                                    // not in use.
                                     var remoteSocket = new Socket(SocketType.Stream, ProtocolType.Tcp);
 
                                     this.StartTcpTunnelConnection(
@@ -518,10 +556,7 @@ public partial class Proxy : IInstance
                                         // window size would exceed the allowed size, which means
                                         // the partner proxy doesn't work correctly or might be
                                         // malicious. In that case, we abort the tunnel connection
-                                        // (not the whole connection to the gateway, because when
-                                        // we are the proxy-client that can possibly handle
-                                        // multiple connections, this would also affect connections
-                                        // from other proxy-servers).
+                                        // (for the reasons mentioned above).
                                         abortTunnelConnectionDueToError = true;
                                     }
                                 }
