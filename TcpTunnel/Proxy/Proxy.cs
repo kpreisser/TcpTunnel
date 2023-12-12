@@ -451,15 +451,47 @@ public partial class Proxy : IInstance
                             // We also do this if the partner proxy server incorrectly uses a
                             // connection ID that's already in use (for the reasons mentioned
                             // above).
+                            bool sendAbort = false;
                             ProxyTunnelConnection<TunnelConnectionData>? existingConnection;
+
                             lock (this.syncRoot)
                             {
                                 activeConnections.TryGetValue(connectionId, out existingConnection);
+
+                                if (existingConnection is null &&
+                                    (this.proxyClientAllowedTargetEndpoints is null ||
+                                    this.proxyClientAllowedTargetEndpoints.Contains((hostname, port))))
+                                {
+                                    var remoteSocket = new Socket(SocketType.Stream, ProtocolType.Tcp);
+
+                                    this.StartTcpTunnelConnection(
+                                        gatewayConnection,
+                                        partnerProxyId,
+                                        activeConnections,
+                                        connectionId,
+                                        remoteSocket,
+                                        async cancellationToken =>
+                                        {
+                                            await remoteSocket.ConnectAsync(hostname, port, cancellationToken);
+
+                                            // After the socket is connected, configure it to disable the Nagle
+                                            // algorithm, disable delayed ACKs, and enable TCP keep-alive.
+                                            SocketConfigurator.ConfigureSocket(
+                                                remoteSocket,
+                                                enableKeepAlive: true);
+
+                                            // Additionally, use a smaller socket send buffer size to reduce
+                                            // buffer bloat.
+                                            remoteSocket.SendBufferSize = Constants.SocketSendBufferSize;
+                                        });
+                                }
+                                else
+                                {
+                                    sendAbort = true;
+                                }
                             }
 
-                            if (this.proxyClientAllowedTargetEndpoints is not null &&
-                                !this.proxyClientAllowedTargetEndpoints.Contains((hostname, port)) ||
-                                existingConnection is not null)
+                            if (sendAbort)
                             {
                                 if (existingConnection is not null)
                                 {
@@ -490,36 +522,6 @@ public partial class Proxy : IInstance
                                 coreMessageToSend.Span[pos++] = ProxyMessageTypeAbortConnection;
 
                                 gatewayConnection.SendMessageByQueue(messageToSend);
-                            }
-                            else
-                            {
-                                lock (this.syncRoot)
-                                {
-                                    // We already checked above that the connectionId is currently
-                                    // not in use.
-                                    var remoteSocket = new Socket(SocketType.Stream, ProtocolType.Tcp);
-
-                                    this.StartTcpTunnelConnection(
-                                        gatewayConnection,
-                                        partnerProxyId,
-                                        activeConnections,
-                                        connectionId,
-                                        remoteSocket,
-                                        async cancellationToken =>
-                                        {
-                                            await remoteSocket.ConnectAsync(hostname, port, cancellationToken);
-
-                                            // After the socket is connected, configure it to disable the Nagle
-                                            // algorithm, disable delayed ACKs, and enable TCP keep-alive.
-                                            SocketConfigurator.ConfigureSocket(
-                                                remoteSocket,
-                                                enableKeepAlive: true);
-
-                                            // Additionally, use a smaller socket send buffer size to reduce
-                                            // buffer bloat.
-                                            remoteSocket.SendBufferSize = Constants.SocketSendBufferSize;
-                                        });
-                                }
                             }
                         }
                         else
