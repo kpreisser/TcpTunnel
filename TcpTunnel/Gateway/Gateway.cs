@@ -279,16 +279,17 @@ public class Gateway : IInstance
                                 // Ignore.
                             }
 
-                            lock (activeHandlers)
-                            {
-                                // Remove the handler.
-                                activeHandlers.Remove(handler);
-                            }
-
                             this.logger?.Invoke(
                                 $"Proxy '{remoteEndpoint}': Connection closed" +
                                 (caughtException is null ? string.Empty : $" ({caughtException.Message})") +
                                 ".");
+
+                            // Finally, remove the handler. This must be the last action
+                            // done in the task.
+                            lock (activeHandlers)
+                            {
+                                activeHandlers.Remove(handler);
+                            }
                         }
                     });
 
@@ -326,7 +327,7 @@ public class Gateway : IInstance
 
             // After releasing the lock, wait for the tasks.
             // Note: The tasks remove themselves from the dictionary, so a task might still
-            // be executing  although it is not in the dictionary any more.
+            // be executing although it is not in the dictionary any more.
             // However this is OK because the task doesn't do anything after that point.
             foreach (var t in tasksToWaitFor)
                 await t;
