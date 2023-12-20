@@ -7,6 +7,7 @@ using System.IO;
 using System.Linq;
 using System.Net.Security;
 using System.Net.Sockets;
+using System.Security.Authentication;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -179,7 +180,7 @@ public partial class Proxy : IInstance
 
     private async Task RunReadTaskAsync(CancellationToken readTaskCancellationToken)
     {
-        this.logger?.Invoke($"Connecting to gateway...");
+        this.logger?.Invoke($"Connecting to gateway (Using SSL: {this.gatewayUseSsl})...");
 
         string? lastConnectionError = null;
 
@@ -220,6 +221,9 @@ public partial class Proxy : IInstance
                         {
                             var modifiedStream = default(Stream);
 
+                            var sslNegotiatedProtocol = default(SslProtocols);
+                            var sslNegotiatedCipherSuite = default(TlsCipherSuite);
+
                             if (this.gatewayUseSsl)
                             {
                                 var sslStream = new SslStream(networkStream);
@@ -231,6 +235,9 @@ public partial class Proxy : IInstance
                                             TargetHost = this.gatewayHost
                                         },
                                         cancellationToken);
+
+                                    sslNegotiatedProtocol = sslStream.SslProtocol;
+                                    sslNegotiatedCipherSuite = sslStream.NegotiatedCipherSuite;
                                 }
                                 catch (Exception ex) when (ex.CanCatch())
                                 {
@@ -242,11 +249,24 @@ public partial class Proxy : IInstance
                             }
 
                             wasConnected = true;
-                            this.logger?.Invoke(
-                                $"Connection established to gateway " +
-                                $"'{this.gatewayHost}:{this.gatewayPort.ToString(CultureInfo.InvariantCulture)}'. " +
-                                $"Authenticating for Session ID '{this.sessionId.ToString(CultureInfo.InvariantCulture)}' " +
-                                $"({(this.proxyServerConnectionDescriptors is not null ? "proxy-server" : "proxy-client")})...");
+
+                            if (this.logger is not null)
+                            {
+                                string sslDetails = $"Using SSL: {this.gatewayUseSsl}";
+
+                                if (this.gatewayUseSsl)
+                                {
+                                    sslDetails +=
+                                        $", Protocol: {Gateway.Gateway.FormatSslProtocol(sslNegotiatedProtocol)}, " +
+                                        $"Cipher Suite: {sslNegotiatedCipherSuite}";
+                                }
+
+                                this.logger.Invoke(
+                                    $"Connection established to gateway " +
+                                    $"'{this.gatewayHost}:{this.gatewayPort.ToString(CultureInfo.InvariantCulture)}' ({sslDetails}). " +
+                                    $"Authenticating for Session ID '{this.sessionId.ToString(CultureInfo.InvariantCulture)}' " +
+                                    $"({(this.proxyServerConnectionDescriptors is not null ? "proxy-server" : "proxy-client")})...");
+                            }
 
                             return modifiedStream;
                         });

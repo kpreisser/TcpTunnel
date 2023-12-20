@@ -1,11 +1,11 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
-using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Security;
 using System.Net.Sockets;
+using System.Security.Authentication;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Threading;
@@ -74,6 +74,20 @@ public class Gateway : IInstance
         get => this.logger;
     }
 
+    public static string FormatSslProtocol(SslProtocols protocol)
+    {
+        return protocol switch
+        {
+#pragma warning disable SYSLIB0039 // Type or member is obsolete
+            SslProtocols.Tls => "TLS 1.0",
+            SslProtocols.Tls11 => "TLS 1.1",
+#pragma warning restore SYSLIB0039 // Type or member is obsolete
+            SslProtocols.Tls12 => "TLS 1.2",
+            SslProtocols.Tls13 => "TLS 1.3",
+            var other => other.ToString()
+        };
+    }
+
     public void Start()
     {
         this.listenersCts = new();
@@ -110,7 +124,7 @@ public class Gateway : IInstance
                 }
 
                 this.logger?.Invoke(
-                    $"Gateway listener started on '{ip?.ToString() ?? "<any>"}:{port.ToString(CultureInfo.InvariantCulture)}'.");
+                    $"Gateway listener started on '{ip?.ToString() ?? "<any>"}:{port.ToString(CultureInfo.InvariantCulture)}' (Using SSL: {certificate is not null}).");
 
                 var listenerTask = ExceptionUtils.StartTask(
                     () => this.RunListenerTaskAsync(listener, certificate, this.listenersCts.Token));
@@ -155,7 +169,6 @@ public class Gateway : IInstance
         CancellationToken cancellationToken)
     {
         var activeHandlers = new Dictionary<GatewayProxyConnectionHandler, Task>();
-        var streamModifier = ModifyStreamAsync;
 
         try
         {
@@ -192,13 +205,51 @@ public class Gateway : IInstance
                 socket.SendBufferSize = Constants.SocketSendBufferSize;
 
                 var remoteEndpoint = socket.RemoteEndPoint!;
-                this.logger?.Invoke($"Accepted connection from '{remoteEndpoint}'.");
+
+                this.logger?.Invoke(
+                    $"Proxy '{remoteEndpoint}': Connection accepted. " +
+                    $"Establishing SSL: {certificate is not null}...");
 
                 var proxyConnection = new TcpFramingConnection(
                     socket,
                     useSendQueue: true,
                     usePingTimer: true,
-                    streamModifier: streamModifier);
+                    streamModifier: async (networkStream, cancellationToken) =>
+                    {
+                        if (certificate is not null)
+                        {
+                            var sslNegotiatedProtocol = default(SslProtocols);
+                            var sslNegotiatedCipherSuite = default(TlsCipherSuite);
+
+                            var sslStream = new SslStream(networkStream);
+                            try
+                            {
+                                await sslStream.AuthenticateAsServerAsync(
+                                    new SslServerAuthenticationOptions()
+                                    {
+                                        ServerCertificate = certificate
+                                    },
+                                    cancellationToken);
+
+                                sslNegotiatedProtocol = sslStream.SslProtocol;
+                                sslNegotiatedCipherSuite = sslStream.NegotiatedCipherSuite;
+                            }
+                            catch (Exception ex) when (ex.CanCatch())
+                            {
+                                await sslStream.DisposeAsync();
+                                throw;
+                            }
+
+                            this.logger?.Invoke(
+                                $"Proxy '{remoteEndpoint}': Established SSL " +
+                                $"(Protocol: {FormatSslProtocol(sslNegotiatedProtocol)}, " +
+                                $"Cipher Suite: {sslNegotiatedCipherSuite}).");
+
+                            return sslStream;
+                        }
+
+                        return null;
+                    });
 
                 var handler = new GatewayProxyConnectionHandler(this, proxyConnection, remoteEndpoint);
 
@@ -207,13 +258,15 @@ public class Gateway : IInstance
                     // Start a task to handle the connection.
                     var runTask = ExceptionUtils.StartTask(async () =>
                     {
+                        var caughtException = default(Exception);
+
                         try
                         {
                             await proxyConnection.RunConnectionAsync(handler.RunAsync, cancellationToken);
                         }
                         catch (Exception ex) when (ex.CanCatch())
                         {
-                            // Ignore.
+                            caughtException = ex;
                         }
                         finally
                         {
@@ -232,7 +285,10 @@ public class Gateway : IInstance
                                 activeHandlers.Remove(handler);
                             }
 
-                            this.logger?.Invoke($"Closed connection from '{remoteEndpoint}'.");
+                            this.logger?.Invoke(
+                                $"Proxy '{remoteEndpoint}': Connection closed" +
+                                (caughtException is null ? string.Empty : $" ({caughtException.Message})") +
+                                ".");
                         }
                     });
 
@@ -274,34 +330,6 @@ public class Gateway : IInstance
             // However this is OK because the task doesn't do anything after that point.
             foreach (var t in tasksToWaitFor)
                 await t;
-        }
-
-        async ValueTask<Stream?> ModifyStreamAsync(
-                NetworkStream networkStream,
-                CancellationToken cancellationToken)
-        {
-            if (certificate is not null)
-            {
-                var sslStream = new SslStream(networkStream);
-                try
-                {
-                    await sslStream.AuthenticateAsServerAsync(
-                        new SslServerAuthenticationOptions()
-                        {
-                            ServerCertificate = certificate
-                        },
-                        cancellationToken);
-                }
-                catch (Exception ex) when (ex.CanCatch())
-                {
-                    await sslStream.DisposeAsync();
-                    throw;
-                }
-
-                return sslStream;
-            }
-
-            return null;
         }
     }
 

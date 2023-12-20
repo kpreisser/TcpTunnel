@@ -175,7 +175,7 @@ internal class GatewayProxyConnectionHandler
                                         couldAuthenticate = true;
 
                                         this.gateway.Logger?.Invoke(
-                                            $"Proxy '{this.remoteEndpoint}' authenticated for Session ID '{sessionId}' " +
+                                            $"Proxy '{this.remoteEndpoint}': Authenticated for Session ID '{sessionId}' " +
                                             $"({(isProxyClient ? "proxy-client" : "proxy-server")}).");
 
                                         // Enter the lock again. We don't need to check whether
