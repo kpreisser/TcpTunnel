@@ -369,7 +369,8 @@ public partial class Proxy : IInstance
                 gatewayConnection.SendMessageByQueue(loginString);
 
                 // Start the ping timer task, then receive packets.
-                pingTimerTask = Task.Run(() => this.RunPingTaskAsync(pingTimerSemaphore, gatewayConnection));
+                pingTimerTask = ExceptionUtils.StartTask(
+                    () => this.RunPingTaskAsync(pingTimerSemaphore, gatewayConnection));
 
                 while (true)
                 {
