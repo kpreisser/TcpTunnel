@@ -562,8 +562,9 @@ public partial class Proxy : IInstance
                                 if (coreMessage.Length >= 1 &&
                                     coreMessage.Span[0] is ProxyMessageTypeData)
                                 {
-                                    // Transmit the data packet (or shutdown the connection if
-                                    // the length is 0).
+                                    // Enqueue the data packet for transmission. If its length is
+                                    // 0, it means the transmit task will shut down the transmit
+                                    // channel when removing that packet from the queue.
                                     // Need to copy the array because the caller might reuse
                                     // the packet array.
                                     var newPacket = new byte[coreMessage.Length - 1];
@@ -573,13 +574,17 @@ public partial class Proxy : IInstance
                                     {
                                         connection.EnqueueTransmitData(newPacket);
                                     }
-                                    catch (ArgumentException)
+                                    catch (Exception ex) when (ex is ArgumentException or InvalidOperationException) 
                                     {
-                                        // An argument exception means the passed data length or
+                                        // An `ArgumentException` means the passed data length or
                                         // window size would exceed the allowed size, which means
                                         // the partner proxy doesn't work correctly or might be
                                         // malicious. In that case, we abort the tunnel connection
                                         // (for the reasons mentioned above).
+                                        // Similarly, an `InvalidOperationException` means the partner
+                                        // incorrectly sent additional transmit packets for the
+                                        // connection even though it had already sent a shutdown
+                                        // packet (i.e. an empty packet).
                                         abortTunnelConnectionDueToError = true;
                                     }
                                 }

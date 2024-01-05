@@ -40,6 +40,12 @@ internal class ProxyTunnelConnection<T>
     /// </summary>
     private int transmitWindowAvailable = Constants.InitialWindowSize;
 
+    /// <summary>
+    /// Specifies whether an empty packet to shut down the transmit channel has
+    /// already been enqueued.
+    /// </summary>
+    private bool transmitShutdown;
+
     private Task? receiveTask;
     private bool receiveTaskStopped;
     private bool transmitTaskStopped;
@@ -94,12 +100,23 @@ internal class ProxyTunnelConnection<T>
     /// <exception cref="ArgumentException">
     /// The queued data's length would exceed the initial window size.
     /// </exception>
+    /// <exception cref="InvalidOperationException">
+    /// This method is called again even though it has already been called with
+    /// an empty packet (which indicates the transmit channel is to be shut down).
+    /// </exception>
     public void EnqueueTransmitData(ReadOnlyMemory<byte> data)
     {
-        // data's length can be 0 to shutdown the connection after sending all
+        // `data`'s length can be 0 to shutdown the transmit channel after sending all
         // enqueued packets.
         lock (this.syncRoot)
         {
+            // Verify that we don't already have added an empty transmit packet,
+            // which indicates that the transmit channel is to be shut down.
+            // This especially ensures that we won't enqueue an unlimited amount
+            // of empty packets.
+            if (this.transmitShutdown)
+                throw new InvalidOperationException("The transmit channel is already shutting down.");
+
             if (this.transmitTaskStopped)
                 return;
 
@@ -109,9 +126,20 @@ internal class ProxyTunnelConnection<T>
             if (data.Length > this.transmitWindowAvailable)
                 throw new ArgumentException("The data would exceed the available transmit window size.");
 
+            // Note: The maximum number of packets in the transmit data queue at any given
+            // time (and the max. times the transmit data semaphore may be released) is the
+            // number of bytes of the default window size, plus one for the empty packet
+            // that shuts down the transmit channel (i.e., `Constants.InitialWindowSize + 1`).
+            // This may theoretically happen if the partner proxy sends data packets with
+            // only 1 byte length.
             this.transmitWindowAvailable -= data.Length;
             this.transmitDataQueue.Enqueue(data);
             this.transmitDataQueueSemaphore.Release();
+
+            // If data's length is 0, the transmit channel is to be shut down, so we may
+            // not enqueue any more transmit packets after this.
+            if (data.Length is 0)
+                this.transmitShutdown = true;
         }
     }
 
@@ -378,7 +406,7 @@ internal class ProxyTunnelConnection<T>
             {
                 this.transmitTaskStopped = true;
 
-                // At this stage, no more messages will be added to the transmit queue, so we
+                // At this stage, no more packets will be added to the transmit queue, so we
                 // clear it.
                 this.transmitDataQueue.Clear();
             }
