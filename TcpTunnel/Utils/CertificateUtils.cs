@@ -4,7 +4,7 @@ using System.Security.Cryptography.X509Certificates;
 
 namespace TcpTunnel.Utils;
 
-internal class CertificateUtils
+internal static class CertificateUtils
 {
     private static readonly StoreLocation[] storeLocations = new[] { StoreLocation.CurrentUser, StoreLocation.LocalMachine };
 

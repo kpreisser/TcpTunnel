@@ -2,7 +2,6 @@
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
-using System.Net;
 using System.Net.Security;
 using System.Net.Sockets;
 using System.Security.Authentication;
@@ -16,6 +15,12 @@ using SimpleSocketClient;
 using TcpTunnel.Networking;
 using TcpTunnel.Utils;
 
+using ListenEntry = (
+    System.Net.IPAddress? ip,
+    int port,
+    System.Security.Cryptography.X509Certificates.X509Certificate2? certificate
+);
+
 namespace TcpTunnel.Gateway;
 
 public class Gateway : IInstance
@@ -28,7 +33,7 @@ public class Gateway : IInstance
     // exceed this size.)
     public const int MaxReceiveMessageSize = 256 * 1024;
 
-    private readonly IReadOnlyList<(IPAddress? ip, int port, X509Certificate2? certificate)> listenEntries;
+    private readonly IReadOnlyList<ListenEntry> listenEntries;
 
     private readonly List<(TcpListener listener, Task task)> activeListeners = new();
 
@@ -37,7 +42,7 @@ public class Gateway : IInstance
     private CancellationTokenSource? listenersCts;
 
     public Gateway(
-        IReadOnlyList<(IPAddress? ip, int port, X509Certificate2? certificate)> listenEntries,
+        IReadOnlyList<ListenEntry> listenEntries,
         IReadOnlyDictionary<int, (string proxyClientPassword, string proxyServerPassword)> sessions,
         Action<string>? logger = null)
     {
@@ -168,7 +173,7 @@ public class Gateway : IInstance
         X509Certificate2? certificate,
         CancellationToken cancellationToken)
     {
-        var activeHandlers = new Dictionary<GatewayProxyConnectionHandler, Task>();
+        var activeHandlerTasks = new HashSet<Task>();
 
         try
         {
@@ -251,17 +256,18 @@ public class Gateway : IInstance
                         return null;
                     });
 
-                var handler = new GatewayProxyConnectionHandler(this, proxyConnection, remoteEndpoint);
+                var handlerTask = default(Task);
 
-                lock (activeHandlers)
+                lock (activeHandlerTasks)
                 {
                     // Start a task to handle the connection.
-                    var runTask = ExceptionUtils.StartTask(async () =>
+                    handlerTask = ExceptionUtils.StartTask(async () =>
                     {
                         var caughtException = default(Exception);
 
                         try
                         {
+                            var handler = new GatewayProxyConnectionHandler(this, proxyConnection, remoteEndpoint);
                             await proxyConnection.RunConnectionAsync(handler.RunAsync, cancellationToken);
                         }
                         catch (Exception ex) when (ex.CanCatch())
@@ -284,18 +290,20 @@ public class Gateway : IInstance
                                 (caughtException is null ? string.Empty : $" ({caughtException.Message})") +
                                 ".");
 
-                            // Finally, remove the handler. This must be the last action
-                            // done in the task.
-                            lock (activeHandlers)
+                            // Finally, remove the handler task. This must be the last
+                            // action done in the task.
+                            lock (activeHandlerTasks)
                             {
-                                activeHandlers.Remove(handler);
+                                // After entering the lock, `handlerTask` is guaranteed
+                                // to be set, and to be present in the hash set.
+                                activeHandlerTasks.Remove(handlerTask!);
                             }
                         }
                     });
 
                     try
                     {
-                        activeHandlers.Add(handler, runTask);
+                        activeHandlerTasks.Add(handlerTask);
                     }
                     catch (Exception ex) when (ex.CanCatch())
                     {
@@ -320,9 +328,9 @@ public class Gateway : IInstance
             // remove themselves from that dictionary.
             Task[] tasksToWaitFor;
 
-            lock (activeHandlers)
+            lock (activeHandlerTasks)
             {
-                tasksToWaitFor = activeHandlers.Values.ToArray();
+                tasksToWaitFor = activeHandlerTasks.ToArray();
             }
 
             // After releasing the lock, wait for the tasks.

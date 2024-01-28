@@ -1,8 +1,7 @@
-﻿namespace TcpTunnel
+﻿namespace TcpTunnel;
+
+internal interface IInstance
 {
-    internal interface IInstance
-    {
-        public void Start();
-        public void Stop();
-    }
+    public void Start();
+    public void Stop();
 }
