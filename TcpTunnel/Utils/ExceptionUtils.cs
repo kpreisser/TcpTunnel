@@ -1,4 +1,6 @@
 ﻿using System;
+using System.Runtime.ExceptionServices;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace TcpTunnel.Utils;
@@ -60,9 +62,29 @@ internal static class ExceptionUtils
         return true;
     }
 
-    public static void HandleUnhandledException(Exception ex)
+    /// <summary>
+    /// Handles an exception by simulating an unhandled exception in a thread pool
+    /// worker thread.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This can be used for long running tasks, to ensure such exceptions will
+    /// be observed immediately, not just when waiting for the task.
+    /// </para>
+    /// <para>
+    /// Note that this method may return before the application is actually
+    /// terminated.
+    /// </para>
+    /// </remarks>
+    /// <param name="exception"></param>
+    public static void HandleUnhandledException(Exception exception)
     {
-        Environment.FailFast("Unhandled Exception: " + ex.ToString(), ex);
+        // Throw the exception in a thread pool worker and return.
+        // This is the same mechanism done by Task.ThrowAsync(), which is used e.g.
+        // when an exception is thrown in an "async void" method.
+        ThreadPool.QueueUserWorkItem(
+            static state => ((ExceptionDispatchInfo)state!).Throw(),
+            ExceptionDispatchInfo.Capture(exception));
     }
 
     /// <summary>
@@ -76,7 +98,7 @@ internal static class ExceptionUtils
     {
         try
         {
-            await asyncFunc();
+            await asyncFunc().ConfigureAwait(false);
         }
         // Using an exception filter to call CanCatch() wouldn't work here since we are
         // calling an async method, whose finally handlers would be executed before our
@@ -84,6 +106,9 @@ internal static class ExceptionUtils
         catch (Exception ex)
         {
             HandleUnhandledException(ex);
+
+            // Ensure the task won't be set to completed until the application terminates.
+            await new TaskCompletionSource().Task.ConfigureAwait(false);
         }
     }
 
