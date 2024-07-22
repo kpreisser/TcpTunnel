@@ -105,10 +105,18 @@ internal static class ExceptionUtils
         // exception filter.
         catch (Exception ex)
         {
-            HandleUnhandledException(ex);
+            try
+            {
+                HandleUnhandledException(ex);
 
-            // Ensure the task won't be set to completed until the application terminates.
-            await new TaskCompletionSource().Task.ConfigureAwait(false);
+                // Ensure the task won't be set to completed until the application terminates.
+                await new TaskCompletionSource().Task.ConfigureAwait(false);
+            }
+            catch (Exception ex2)
+            {
+                // Ensure the new exception isn't swallowed or delayed.
+                Environment.FailFast(ex2.Message, ex2);
+            }
         }
     }
 
