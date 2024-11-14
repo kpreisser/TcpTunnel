@@ -64,7 +64,7 @@ internal class TcpConnection : Connection
         try
         {
             // Wait until data is available.
-            await this.stream!.ReadAsync(Memory<byte>.Empty, cancellationToken)
+            _ = await this.stream!.ReadAsync(Memory<byte>.Empty, cancellationToken)
                 .ConfigureAwait(false);
 
             // Get a receive buffer from the pool.

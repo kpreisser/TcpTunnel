@@ -206,7 +206,7 @@ internal class ProxyTunnelConnection<T>
                 while (true)
                 {
                     // Wait until more data is available.
-                    await remoteSocketStream.ReadAsync(Memory<byte>.Empty, this.cts.Token);
+                    _ = await remoteSocketStream.ReadAsync(Memory<byte>.Empty, this.cts.Token);
 
                     // Collect the available window, then receive the data.
                     currentWindow = await CollectAvailableWindowAsync(currentWindow);
