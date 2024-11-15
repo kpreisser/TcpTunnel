@@ -2,10 +2,8 @@
   <!-- A 'Gateway' instance listens on the specified TCP port (optionally using SSL/TLS), and waits for
        connections from both the 'Proxy-Server' and the 'Proxy-Client' instances. -->
   <Instance type="gateway">
-    <!-- You can define multiple listeners. -->
-    <!-- Note: 'ip' is optional -->
-    <Listener ip="127.0.0.20" port="25200"/>
-
+    <!-- You can define multiple listeners (IP + port + optional SSL/TLS certificate). -->
+    
     <!-- Specify one of 'certificateHash', 'certificatePfxFilePath', or 'certificatePemFilePath' attributes
          in order to use SSL/TLS. 
     
@@ -14,6 +12,8 @@
          The cert needs to be stored in the current user's or the local machine's "My" certificate store, and
          you need to be able to access the private key (i.e. you probably need to run the app as administrator
          when the cert is stored in the local machine store).
+         With Powershell, you can go to the path "Cert:\LocalMachine\My" for the local machine, or
+         "Cert:\CurrentUser\My" for the current user.
         
          Alternatively, or if running on other OSes like Linux, you can specify the 'certificatePfxFilePath' 
          attribute containing a file path of a .pfx (PKCS #12) file that contains the SSL/TLS certificate
@@ -21,13 +21,20 @@
          the 'certificatePemFilePath' and 'certificatePemKeyFilePath' attributes to load a certificate from
          PEM files.
          (Note: Using PEM files currently doesn't always seem to work on Windows; in that case use a .pfx
-         file.)
-         
-         If none of the certificate* attributes are specified, SSL/TLS is not used. -->
+         file.)         
+         -->
     <Listener port="25201" certificateHash="0000000000000000000000000000000000000000" />
     <Listener port="25202" certificatePfxFilePath="my-cert.pfx" certificatePfxPassword="pfx-password" />
     <Listener port="25203" certificatePemFilePath="my-cert.pem" certificatePemKeyFilePath="my-private-key.pem" />
     
+    <!-- If none of the certificate* attributes are specified, SSL/TLS is not used. In that case, you
+         need to specify useSsl="0" in the proxy-client and proxy-server configurations, but this
+         also means the connection to the gateway will not be secure (authenticated and encrypted),
+         and should only be used for testing/development purposes.
+    -->
+    <!-- Note: 'ip' is optional. -->
+    <Listener ip="127.0.0.20" port="25200"/>
+
     <!-- Specify one or more sessions. Note that for each session, multiple proxy-servers can connect,
          but only a single proxy-client can connect. -->
     <Session id="123" proxyClientPassword="my_secret_password_client" proxyServerPassword="my_secret_password_server" />
