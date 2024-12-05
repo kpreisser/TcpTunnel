@@ -44,7 +44,7 @@ internal class TcpFramingConnection : TcpConnection
     {
         if (this.currentReadBufferFromPool is not null)
         {
-            ArrayPool<byte>.Shared.Return(this.currentReadBufferFromPool);
+            ArrayPool<byte>.Shared.Return(this.currentReadBufferFromPool, clearArray: true);
             this.currentReadBufferFromPool = null;
         }
 
@@ -99,7 +99,7 @@ internal class TcpFramingConnection : TcpConnection
     {
         if (this.currentReadBufferFromPool is not null)
         {
-            ArrayPool<byte>.Shared.Return(this.currentReadBufferFromPool);
+            ArrayPool<byte>.Shared.Return(this.currentReadBufferFromPool, clearArray: true);
             this.currentReadBufferFromPool = null;
         }
 
@@ -125,7 +125,7 @@ internal class TcpFramingConnection : TcpConnection
         }
         finally
         {
-            ArrayPool<byte>.Shared.Return(newFrameArray);
+            ArrayPool<byte>.Shared.Return(newFrameArray, clearArray: true);
         }
     }
 }

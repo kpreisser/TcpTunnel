@@ -237,7 +237,7 @@ internal class ProxyTunnelConnection<T>
                     }
                     finally
                     {
-                        ArrayPool<byte>.Shared.Return(receiveBuffer);
+                        ArrayPool<byte>.Shared.Return(receiveBuffer, clearArray: true);
                     }
                 }
             }

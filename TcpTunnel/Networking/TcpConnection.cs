@@ -57,7 +57,7 @@ internal class TcpConnection : Connection
     {
         if (this.currentReadBufferFromPool is not null)
         {
-            ArrayPool<byte>.Shared.Return(this.currentReadBufferFromPool);
+            ArrayPool<byte>.Shared.Return(this.currentReadBufferFromPool, clearArray: true);
             this.currentReadBufferFromPool = null;
         }
 
@@ -135,7 +135,7 @@ internal class TcpConnection : Connection
     {
         if (this.currentReadBufferFromPool is not null)
         {
-            ArrayPool<byte>.Shared.Return(this.currentReadBufferFromPool);
+            ArrayPool<byte>.Shared.Return(this.currentReadBufferFromPool, clearArray: true);
             this.currentReadBufferFromPool = null;
         }
 
