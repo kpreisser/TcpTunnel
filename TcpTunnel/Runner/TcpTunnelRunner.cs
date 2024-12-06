@@ -111,7 +111,7 @@ internal class TcpTunnelRunner
                         else if (certificatePfxFilePath is not null)
                         {
                             // Load the certificate from a PFX file.
-                            certificate = new X509Certificate2(certificatePfxFilePath, certificatePfxPassword);
+                            certificate = X509CertificateLoader.LoadPkcs12FromFile(certificatePfxFilePath, certificatePfxPassword);
 
                             if (!certificate.HasPrivateKey)
                                 throw new Exception("Certificate doesn't have a private key.");
