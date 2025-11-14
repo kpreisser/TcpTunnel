@@ -11,7 +11,7 @@ echo.
 REM Note that we need to specify both "Configuration" and "Platform" parameters, because
 REM otherwise MSBuild will fill missing parameters from environment variables (and some
 REM systems may have set a "Platform" variable).
-"dotnet.exe" publish "TcpTunnel\TcpTunnel.csproj" -f net9.0 -c Release -r win-x64 -p:Platform=AnyCPU -p:PublishSingleFile=true --no-self-contained
+"dotnet.exe" publish "TcpTunnel\TcpTunnel.csproj" -f net10.0 -c Release -r win-x64 -p:Platform=AnyCPU -p:PublishSingleFile=true --no-self-contained
 if not errorlevel 1 (
 	echo.
 	echo.Build successful^^!
