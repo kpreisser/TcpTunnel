@@ -127,7 +127,7 @@ internal class ProxyServerListener
                 // was in the backlog. In that case, just try again.
                 continue;
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 // The CTS was cancelled.
                 break;

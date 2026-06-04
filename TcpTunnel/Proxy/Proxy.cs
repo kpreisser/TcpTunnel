@@ -310,7 +310,7 @@ public partial class Proxy : IInstance
                 await Task.Delay(2000, readTaskCancellationToken);
             }
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (readTaskCancellationToken.IsCancellationRequested)
         {
             // The proxy was stopped, so return.
             return;
