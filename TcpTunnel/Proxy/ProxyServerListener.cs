@@ -51,10 +51,9 @@ internal class ProxyServerListener
                 }
                 catch (Exception ex) when (ex.CanCatch())
                 {
-                    // Stop() will dispose the underlying socket.
                     try
                     {
-                        listener?.Stop();
+                        listener?.Dispose();
                     }
                     catch (Exception ex2) when (ex2.CanCatch())
                     {
@@ -101,7 +100,7 @@ internal class ProxyServerListener
             task.GetAwaiter().GetResult();
 
             // Dispose of the TcpListener.
-            listener.Stop();
+            listener.Dispose();
         }
 
         this.listeners.Clear();

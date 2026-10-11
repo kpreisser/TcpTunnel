@@ -113,10 +113,9 @@ public class Gateway : IInstance
                 }
                 catch (Exception ex) when (ex.CanCatch())
                 {
-                    // Stop() will dispose the underlying socket.
                     try
                     {
-                        listener?.Stop();
+                        listener?.Dispose();
                     }
                     catch (Exception ex2) when (ex2.CanCatch())
                     {
@@ -160,7 +159,7 @@ public class Gateway : IInstance
             task.GetAwaiter().GetResult();
 
             // Dispose of the TcpListener.
-            listener.Stop();
+            listener.Dispose();
         }
 
         this.activeListeners.Clear();
@@ -285,18 +284,23 @@ public class Gateway : IInstance
                                 // Ignore.
                             }
 
-                            this.logger?.Invoke(
-                                $"Proxy '{remoteEndpoint}': Connection closed" +
-                                (caughtException is null ? string.Empty : $" ({caughtException.Message})") +
-                                ".");
-
-                            // Finally, remove the handler task. This must be the last
-                            // action done in the task.
-                            lock (activeHandlerTasks)
+                            try
                             {
-                                // After entering the lock, `handlerTask` is guaranteed
-                                // to be set, and to be present in the hash set.
-                                activeHandlerTasks.Remove(handlerTask!);
+                                this.logger?.Invoke(
+                                    $"Proxy '{remoteEndpoint}': Connection closed" +
+                                    (caughtException is null ? string.Empty : $" ({caughtException.Message})") +
+                                    ".");
+                            }
+                            finally
+                            {
+                                // Finally, remove the handler task. This must be the last
+                                // action done in the task.
+                                lock (activeHandlerTasks)
+                                {
+                                    // After entering the lock, `handlerTask` is guaranteed
+                                    // to be set, and to be present in the hash set.
+                                    activeHandlerTasks.Remove(handlerTask!);
+                                }
                             }
                         }
                     });
@@ -330,12 +334,12 @@ public class Gateway : IInstance
 
             lock (activeHandlerTasks)
             {
-                tasksToWaitFor = activeHandlerTasks.ToArray();
+                tasksToWaitFor = [.. activeHandlerTasks];
             }
 
             // After releasing the lock, wait for the tasks.
-            // Note: The tasks remove themselves from the dictionary, so a task might still
-            // be executing although it is not in the dictionary any more.
+            // Note: The tasks remove themselves from the dictionary, so a task might
+            // still be executing although it is not in the dictionary any more.
             // However this is OK because the task doesn't do anything after that point.
             foreach (var t in tasksToWaitFor)
                 await t;
