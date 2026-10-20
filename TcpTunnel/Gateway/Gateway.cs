@@ -266,8 +266,11 @@ public class Gateway : IInstance
 
                         try
                         {
-                            var handler = new GatewayProxyConnectionHandler(this, proxyConnection, remoteEndpoint);
-                            await proxyConnection.RunConnectionAsync(handler.RunAsync, cancellationToken);
+                            using (socket)
+                            {
+                                var handler = new GatewayProxyConnectionHandler(this, proxyConnection, remoteEndpoint);
+                                await proxyConnection.RunConnectionAsync(handler.RunAsync, cancellationToken);
+                            }
                         }
                         catch (Exception ex) when (ex.CanCatch())
                         {
@@ -275,15 +278,6 @@ public class Gateway : IInstance
                         }
                         finally
                         {
-                            try
-                            {
-                                socket.Dispose();
-                            }
-                            catch (Exception ex) when (ex.CanCatch())
-                            {
-                                // Ignore.
-                            }
-
                             try
                             {
                                 this.logger?.Invoke(
