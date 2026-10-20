@@ -1,0 +1,6 @@
+<Solution>
+  <Project Path="TcpTunnel/TcpTunnel.csproj" />
+  <Project Path="TestGateway/TestGateway.csproj" />
+  <Project Path="TestProxyClient/TestProxyClient.csproj" />
+  <Project Path="TestProxyServer/TestProxyServer.csproj" />
+</Solution>
