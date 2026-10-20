@@ -147,6 +147,20 @@ public partial class Proxy : IInstance
         return true;
     }
 
+    private static async Task RunPingTaskAsync(
+        SemaphoreSlim pingTimerSemaphore,
+        TcpFramingConnection connection)
+    {
+        while (true)
+        {
+            bool exit = await pingTimerSemaphore.WaitAsync(30000);
+            if (exit)
+                return;
+
+            connection.SendMessageByQueue([0xFF]);
+        }
+    }
+
     public void Start()
     {
         if (this.proxyServerConnectionDescriptors is not null)
@@ -199,7 +213,7 @@ public partial class Proxy : IInstance
                     var gatewayConnection = new TcpFramingConnection(
                         socket,
                         useSendQueue: true,
-                        usePingTimer: false,
+                        usePingTimer: true,
                         connectHandler: async cancellationToken =>
                         {
                             // Note: We will log the "Connected" message in the stream modifier
@@ -317,20 +331,6 @@ public partial class Proxy : IInstance
         }
     }
 
-    private async Task RunPingTaskAsync(
-        SemaphoreSlim pingTimerSemaphore,
-        TcpFramingConnection gatewayConnection)
-    {
-        while (true)
-        {
-            bool exit = await pingTimerSemaphore.WaitAsync(30000);
-            if (exit)
-                return;
-
-            gatewayConnection.SendMessageByQueue(new byte[] { 0xFF });
-        }
-    }
-
     private async Task RunConnectionAsync(
         TcpFramingConnection gatewayConnection,
         CancellationToken cancellationToken)
@@ -370,7 +370,7 @@ public partial class Proxy : IInstance
 
                 // Start the ping timer task, then receive packets.
                 pingTimerTask = ExceptionUtils.StartTask(
-                    () => this.RunPingTaskAsync(pingTimerSemaphore, gatewayConnection));
+                    () => RunPingTaskAsync(pingTimerSemaphore, gatewayConnection));
 
                 while (true)
                 {
@@ -381,6 +381,7 @@ public partial class Proxy : IInstance
                     if (packet is null)
                         return;
 
+                    gatewayConnection.HandlePing();
                     var packetBuffer = packet.Value.Buffer;
 
                     if (packetBuffer.Length >= 2 && packetBuffer.Span[0] is 0x01)
@@ -574,7 +575,7 @@ public partial class Proxy : IInstance
                                     {
                                         connection.EnqueueTransmitData(newPacket);
                                     }
-                                    catch (Exception ex) when (ex is ArgumentException or InvalidOperationException) 
+                                    catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
                                     {
                                         // An `ArgumentException` means the passed data length or
                                         // window size would exceed the allowed size, which means
@@ -635,8 +636,11 @@ public partial class Proxy : IInstance
                 foreach (ulong partnerProxyId in this.activePartnerProxiesAndConnections.Keys.ToArray())
                     await this.HandlePartnerProxyUnavailableAsync(partnerProxyId);
 
+                // Release the ping timer and wait for it to complete.
                 pingTimerSemaphore.Release();
-                await (pingTimerTask ?? Task.CompletedTask);
+
+                if (pingTimerTask is not null)
+                    await pingTimerTask;
 
                 // Once this method returns, the connection may no longer
                 // be used to send data, so clear the instance.

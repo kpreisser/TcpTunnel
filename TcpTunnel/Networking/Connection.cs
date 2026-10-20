@@ -29,7 +29,8 @@ internal abstract partial class Connection
     /// <remarks>
     /// This is to prevent us from buffering more data endlessly if the peer doesn't
     /// read from the socket. However, the limit is relatively large to not
-    /// erroneously abort the connection when we actually want to send that much messages.
+    /// erroneously abort the connection when we actually want to send that much
+    /// messages.
     /// </remarks>
     private const long MaxSendQueueByteLength = 50 * 1024 * 1024;
 
