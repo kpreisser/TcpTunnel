@@ -64,7 +64,7 @@ internal class GatewayProxyConnectionHandler
     {
         while (true)
         {
-            bool exit = await pingTimerSemaphore.WaitAsync(30000);
+            bool exit = await pingTimerSemaphore.WaitAsync(Connection.PingInterval);
             if (exit)
                 return;
 

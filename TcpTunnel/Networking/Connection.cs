@@ -20,6 +20,10 @@ namespace TcpTunnel.Networking;
 /// </remarks>
 internal abstract partial class Connection
 {
+    public const int PingInterval = 20 * 1000;
+
+    public const int PingTimeout = 60 * 1000;
+
     // TODO: Make this configurable.
     /// <summary>
     /// The maximum byte length of messages that can be queued before the connection
@@ -32,7 +36,7 @@ internal abstract partial class Connection
     /// erroneously abort the connection when we actually want to send that much
     /// messages.
     /// </remarks>
-    private const long MaxSendQueueByteLength = 50 * 1024 * 1024;
+    private const long MaxSendQueueByteLength = 100 * 1024 * 1024;
 
     /// <summary>
     /// The minimum number of enqueued messages before the check for
@@ -44,15 +48,13 @@ internal abstract partial class Connection
     /// </remarks>
     private const long MinSendQueueItemCountForByteLengthCheck = 100;
 
-    private const int PingTimeout = 120 * 1000;
-
     protected static readonly Encoding TextMessageEncoding =
         new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
 
     private readonly bool useSendQueue;
     private readonly bool usePingTimer;
 
-    private readonly object sendQueueSyncRoot = new();
+    private readonly Lock sendQueueLock = new();
 
     private CancellationTokenSource? cancellationTokenSource;
 
@@ -172,7 +174,9 @@ internal abstract partial class Connection
         CancellationToken cancellationToken);
 
     /// <summary>
-    /// Resets the ping timer after receiving a peer's ping message.
+    /// Resets the ping timer after receiving a peer's ping message. The peer should
+    /// use the interval specified by <see cref="PingInterval"/> to send a ping when
+    /// <c>usePingTimer</c> is enabled.
     /// </summary>
     public void HandlePing()
     {
@@ -270,7 +274,7 @@ internal abstract partial class Connection
             if (this.sendQueueWorkerTask is not null)
             {
                 // Allow the send task to exit (we will close the connection later).
-                lock (this.sendQueueSyncRoot)
+                lock (this.sendQueueLock)
                 {
                     this.sendQueue!.Enqueue(new MessageQueueElement()
                     {
@@ -291,7 +295,7 @@ internal abstract partial class Connection
                 this.sendQueueSemaphore.Dispose();
                 this.sendQueueSemaphore = null;
 
-                lock (this.sendQueueSyncRoot)
+                lock (this.sendQueueLock)
                     this.sendQueueWorkerTask = null;
             }
 
@@ -397,7 +401,7 @@ internal abstract partial class Connection
             // Ensure the task can see the fields.
             Thread.MemoryBarrier();
 
-            lock (this.sendQueueSyncRoot)
+            lock (this.sendQueueLock)
             {
                 this.sendQueueWorkerTask = ExceptionUtils.StartTask(
                     this.RunSendQueueWorkerTaskAsync);
@@ -414,7 +418,7 @@ internal abstract partial class Connection
             throw new InvalidOperationException("Only non-queued writes are supported.");
 
         bool cancelConnection = false;
-        lock (this.sendQueueSyncRoot)
+        lock (this.sendQueueLock)
         {
             if (this.sendQueueWorkerTask is null)
             {
@@ -490,7 +494,7 @@ internal abstract partial class Connection
                     .ConfigureAwait(false);
 
                 MessageQueueElement el;
-                lock (this.sendQueueSyncRoot)
+                lock (this.sendQueueLock)
                 {
                     // Process elements with a high priority first.
                     if (!this.sendQueueHighPriority!.TryDequeue(out el))
@@ -539,7 +543,7 @@ internal abstract partial class Connection
         }
         finally
         {
-            lock (this.sendQueueSyncRoot)
+            lock (this.sendQueueLock)
             {
                 this.sendStopped = true;
 

@@ -45,7 +45,7 @@ public partial class Proxy : IInstance
     private const int ProxyMessageTypeAbortConnection = 0x02;
     private const int ProxyMessageTypeUpdateWindow = 0x03;
 
-    private readonly object syncRoot = new();
+    private readonly Lock syncRoot = new();
 
     private readonly string gatewayHost;
     private readonly int gatewayPort;
@@ -153,7 +153,7 @@ public partial class Proxy : IInstance
     {
         while (true)
         {
-            bool exit = await pingTimerSemaphore.WaitAsync(30000);
+            bool exit = await pingTimerSemaphore.WaitAsync(Connection.PingInterval);
             if (exit)
                 return;
 
@@ -671,7 +671,7 @@ public partial class Proxy : IInstance
         Socket remoteSocket,
         Func<CancellationToken, ValueTask>? connectHandler = null)
     {
-        Debug.Assert(Monitor.IsEntered(this.syncRoot));
+        Debug.Assert(this.syncRoot.IsHeldByCurrentThread);
 
         var connection = default(ProxyTunnelConnection<TunnelConnectionData>);
         connection = new(
