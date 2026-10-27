@@ -381,10 +381,14 @@ public partial class Proxy : IInstance
                     if (packet is null)
                         return;
 
-                    gatewayConnection.HandlePing();
                     var packetBuffer = packet.Value.Buffer;
 
-                    if (packetBuffer.Length >= 2 && packetBuffer.Span[0] is 0x01)
+                    if (packetBuffer.Length == 1 && packetBuffer.Span[0] == 0xFF)
+                    {
+                        // Handle a ping message.
+                        gatewayConnection.HandlePing();
+                    }
+                    else if (packetBuffer.Length >= 2 && packetBuffer.Span[0] is 0x01)
                     {
                         bool authenticationSucceeded = packetBuffer.Span[1] is 0x01;
 
