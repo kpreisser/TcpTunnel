@@ -68,7 +68,7 @@ internal class GatewayProxyConnectionHandler
             if (exit)
                 return;
 
-            connection.SendMessageByQueue([0xFF]);
+            connection.SendMessageByQueue([0xFF], highPriority: true);
         }
     }
 
